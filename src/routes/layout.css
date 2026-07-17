@@ -76,16 +76,24 @@ p { text-wrap: pretty; }
 .planet-crater { position: absolute; border-radius: 50%; background: rgba(69,81,0,.13); }
 .crater-one { width: 15%; aspect-ratio: 1; right: 15%; top: 25%; }
 .crater-two { width: 10%; aspect-ratio: 1; left: 22%; bottom: 18%; }
-.orbit { position: absolute; inset: 13%; border: 1px solid rgba(255,255,255,.23); border-radius: 50%; transform: rotate(-24deg); }
-.orbit-two { inset: 2%; transform: rotate(33deg); border-color: rgba(214,242,71,.2); }
-.orbit-dot { position: absolute; width: 19px; aspect-ratio: 1; border-radius: 50%; background: var(--coral); box-shadow: 0 0 20px rgba(255,98,98,.5); }
-.dot-one { top: 12%; left: 12%; }
-.dot-two { right: 8%; bottom: 22%; background: var(--sky); box-shadow: 0 0 20px rgba(167,221,237,.5); }
-.rocket-wrap { position: absolute; right: 11%; top: 10%; color: white; transform: rotate(44deg); animation: float 3s ease-in-out infinite; }
-.math-spark { position: absolute; padding: 9px 13px; border-radius: 10px; background: rgba(255,255,255,.1); color: #d9dff0; backdrop-filter: blur(8px); font-family: 'Space Grotesk'; font-size: 13px; font-weight: 700; }
-.spark-one { left: 3%; top: 22%; transform: rotate(-8deg); }
-.spark-two { right: 2%; bottom: 25%; transform: rotate(6deg); }
-.spark-three { left: 10%; bottom: 9%; transform: rotate(4deg); }
+.orbit { position: absolute; inset: 13%; border: 1px solid rgba(255,255,255,.23); border-radius: 50%; }
+.orbit-two { inset: 2%; border-color: rgba(214,242,71,.2); }
+.orbiter { position: absolute; inset: var(--orbit-inset); z-index: 2; border-radius: 50%; pointer-events: none; animation: orbitSpin var(--orbit-duration) linear var(--orbit-delay) infinite; will-change: transform; }
+.orbit-facing { position: absolute; left: 50%; top: 0; display: grid; place-items: center; transform: translate(-50%, -50%); animation: orbitCounterSpin var(--orbit-duration) linear var(--orbit-delay) infinite; pointer-events: auto; will-change: transform; }
+.orbit-red { --orbit-inset: 13%; --orbit-duration: 18s; --orbit-delay: -14s; --orbit-start: 280deg; --counter-start: -280deg; }
+.orbit-blue { --orbit-inset: 2%; --orbit-duration: 27s; --orbit-delay: -12s; --orbit-start: 160deg; --counter-start: -160deg; }
+.orbit-rocket { --orbit-inset: 2%; --orbit-duration: 36s; --orbit-delay: -4s; --orbit-start: 40deg; --counter-start: -40deg; }
+.orbit-problem-one { --orbit-inset: 2%; --orbit-duration: 44s; --orbit-delay: -34s; --orbit-start: 278deg; --counter-start: -278deg; }
+.orbit-problem-two { --orbit-inset: 2%; --orbit-duration: 50s; --orbit-delay: -18s; --orbit-start: 130deg; --counter-start: -130deg; }
+.orbit-dot { display: block; width: 19px; aspect-ratio: 1; border-radius: 50%; background: var(--coral); box-shadow: 0 0 20px rgba(255,98,98,.5); transition-property: transform, filter; transition-duration: 180ms; transition-timing-function: cubic-bezier(.2,0,0,1); }
+.dot-two { background: var(--sky); box-shadow: 0 0 20px rgba(167,221,237,.5); }
+.rocket-wrap { color: white; }
+.orbit-rocket .orbit-facing { animation: none; }
+.rocket-icon { display: grid; transform: rotate(44deg); transition-property: transform, filter; transition-duration: 180ms; transition-timing-function: cubic-bezier(.2,0,0,1); }
+.math-spark { width: max-content; padding: 9px 13px; border-radius: 10px; background: rgba(255,255,255,.1); color: #d9dff0; backdrop-filter: blur(8px); font-family: 'Space Grotesk'; font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; box-shadow: 0 8px 20px rgba(0,0,0,.14); transition-property: transform, background-color, filter; transition-duration: 180ms; transition-timing-function: cubic-bezier(.2,0,0,1); }
+.orbit-facing:hover .orbit-dot { transform: scale(1.28) rotate(-8deg); filter: brightness(1.14); }
+.orbit-facing:hover .math-spark { transform: scale(1.08) rotate(-5deg); background: rgba(255,255,255,.17); filter: brightness(1.08); }
+.rocket-wrap:hover .rocket-icon { transform: rotate(36deg) scale(1.1); filter: drop-shadow(0 0 11px rgba(255,255,255,.35)); }
 
 .mission-section { padding: 105px max(clamp(20px, 7vw, 110px), env(safe-area-inset-right)) 120px max(clamp(20px, 7vw, 110px), env(safe-area-inset-left)); }
 .section-heading { display: flex; align-items: end; justify-content: space-between; gap: 40px; margin-bottom: 42px; }
@@ -224,7 +232,8 @@ footer { min-height: 120px; padding: 30px max(clamp(20px, 7vw, 110px), env(safe-
 .result-actions { display: flex; justify-content: center; gap: 12px; }
 
 @keyframes rise { from { opacity: 0; transform: translateY(22px); } to { opacity: 1; transform: translateY(0); } }
-@keyframes float { 0%,100% { transform: rotate(44deg) translateY(0); } 50% { transform: rotate(40deg) translateY(-12px); } }
+@keyframes orbitSpin { to { transform: rotate(360deg); } }
+@keyframes orbitCounterSpin { to { transform: translate(-50%, -50%) rotate(-360deg); } }
 @keyframes pop { 0% { transform: rotate(3deg) scale(.7); } 70% { transform: rotate(-3deg) scale(1.1); } 100% { transform: rotate(3deg) scale(1); } }
 @keyframes resultIn { from { opacity: 0; transform: translateY(20px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
 @keyframes badgeIn { from { opacity: 0; transform: scale(.4) rotate(-25deg); } to { opacity: 1; transform: scale(1) rotate(0); } }
@@ -253,7 +262,7 @@ footer { min-height: 120px; padding: 30px max(clamp(20px, 7vw, 110px), env(safe-
 	.hero h1 { font-size: clamp(49px, 15vw, 72px); }
 	.hero-copy > p { margin: 20px 0 25px; max-width: 340px; font-size: 17px; }
 	.orbit-scene { position: absolute; width: 74vw; right: -29vw; bottom: -13vw; opacity: .3; }
-	.math-spark, .rocket-wrap { display: none; }
+	.orbit-problem, .orbit-rocket { display: none; }
 	.mission-section { padding: 75px max(16px, env(safe-area-inset-right)) 85px max(16px, env(safe-area-inset-left)); }
 	.section-heading { align-items: start; flex-direction: column; gap: 14px; margin-bottom: 28px; }
 	.section-heading h2, .badge-intro h2 { font-size: 42px; }
@@ -294,4 +303,6 @@ footer { min-height: 120px; padding: 30px max(clamp(20px, 7vw, 110px), env(safe-
 
 @media (prefers-reduced-motion: reduce) {
 	*, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+	.orbiter { animation: none !important; transform: rotate(var(--orbit-start)); }
+	.orbit-facing { animation: none !important; transform: translate(-50%, -50%) rotate(var(--counter-start)); }
 }

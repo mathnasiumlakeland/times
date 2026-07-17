@@ -73,7 +73,9 @@
 	let hardInputStatus = $state<'idle' | 'wrong' | 'correct'>('idle');
 	let hardInput = $state<HTMLInputElement>();
 	let feedback = $state<'correct' | 'wrong' | null>(null);
+	let orbitProblems = $state<[string, string]>(['7 × 8', '12 × 4']);
 	let progress = $state<Progress>({ completed: [], hardCompleted: [], bestScores: {}, hardBestScores: {}, totalStars: 0 });
+	let rocketBoostFrame: number | undefined;
 
 	let currentQuestion = $derived(questions[questionIndex] ?? { table: activeTable, multiplier: 1 });
 	let correctAnswer = $derived(currentQuestion.table * currentQuestion.multiplier);
@@ -101,6 +103,8 @@
 	});
 
 	onMount(() => {
+		orbitProblems = makeOrbitProblems();
+
 		for (const [name, url] of Object.entries(soundUrls) as [SoundName, string][]) {
 			const audio = new Audio(url);
 			audio.preload = 'auto';
@@ -135,6 +139,47 @@
 
 	function shuffled<T>(items: T[]) {
 		return [...items].sort(() => Math.random() - 0.5);
+	}
+
+	function makeOrbitProblem() {
+		const table = Math.floor(Math.random() * 12) + 1;
+		const multiplier = Math.floor(Math.random() * 12) + 1;
+		return `${table} × ${multiplier}`;
+	}
+
+	function makeOrbitProblems(): [string, string] {
+		const first = makeOrbitProblem();
+		let second = makeOrbitProblem();
+		while (second === first) second = makeOrbitProblem();
+		return [first, second];
+	}
+
+	function boostRocket(event: PointerEvent) {
+		const rocketOrbit = (event.currentTarget as HTMLElement).closest<HTMLElement>('.orbit-rocket');
+		const orbitAnimation = rocketOrbit?.getAnimations().find((animation) => animation.playState === 'running');
+		if (!orbitAnimation) return;
+
+		if (rocketBoostFrame !== undefined) cancelAnimationFrame(rocketBoostFrame);
+
+		const boostStartedAt = performance.now();
+		const burstDuration = 1100;
+		const peakRate = 3.25;
+		orbitAnimation.playbackRate = peakRate;
+
+		const settleToCruise = (now: number) => {
+			const progress = Math.min((now - boostStartedAt) / burstDuration, 1);
+			const easedProgress = 1 - Math.pow(1 - progress, 3);
+			orbitAnimation.playbackRate = peakRate + (1 - peakRate) * easedProgress;
+
+			if (progress < 1) {
+				rocketBoostFrame = requestAnimationFrame(settleToCruise);
+			} else {
+				orbitAnimation.playbackRate = 1;
+				rocketBoostFrame = undefined;
+			}
+		};
+
+		rocketBoostFrame = requestAnimationFrame(settleToCruise);
 	}
 
 	function makeOptions(answer: number, table: number) {
@@ -333,17 +378,29 @@
 			</div>
 
 			<div class="orbit-scene" aria-hidden="true">
-				<div class="orbit orbit-one"><span class="orbit-dot dot-one"></span></div>
-				<div class="orbit orbit-two"><span class="orbit-dot dot-two"></span></div>
+				<div class="orbit orbit-one"></div>
+				<div class="orbit orbit-two"></div>
+				<div class="orbiter orbit-red">
+					<span class="orbit-facing"><span class="orbit-dot dot-one"></span></span>
+				</div>
+				<div class="orbiter orbit-blue">
+					<span class="orbit-facing"><span class="orbit-dot dot-two"></span></span>
+				</div>
 				<div class="planet">
 					<div class="planet-shine"></div>
 					<span class="planet-number">×</span>
 					<span class="planet-crater crater-one"></span>
 					<span class="planet-crater crater-two"></span>
 				</div>
-				<div class="rocket-wrap"><Rocket size={57} strokeWidth={2.1} /></div>
-				<div class="math-spark spark-one">7 × 8</div>
-				<div class="math-spark spark-two">12 × 4</div>
+				<div class="orbiter orbit-rocket">
+					<span class="orbit-facing rocket-wrap" role="presentation" onpointerenter={boostRocket}><span class="rocket-icon"><Rocket size={57} strokeWidth={2.1} /></span></span>
+				</div>
+				<div class="orbiter orbit-problem orbit-problem-one">
+					<span class="orbit-facing"><span class="math-spark">{orbitProblems[0]}</span></span>
+				</div>
+				<div class="orbiter orbit-problem orbit-problem-two">
+					<span class="orbit-facing"><span class="math-spark">{orbitProblems[1]}</span></span>
+				</div>
 			</div>
 		</section>
 
