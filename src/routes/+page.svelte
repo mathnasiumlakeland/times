@@ -350,9 +350,18 @@
 		mode = 'result';
 	}
 
+	function scrollToPageTop(event?: MouseEvent) {
+		if (event && (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)) return;
+		event?.preventDefault();
+		if (window.location.hash) {
+			window.history.replaceState(window.history.state, '', `${window.location.pathname}${window.location.search}`);
+		}
+		window.scrollTo({ top: 0, behavior: 'smooth' });
+	}
+
 	function goHome() {
 		mode = 'home';
-		window.scrollTo({ top: 0, behavior: 'smooth' });
+		scrollToPageTop();
 	}
 
 	function handleKeydown(event: KeyboardEvent) {
@@ -375,10 +384,10 @@
 {#if mode === 'home'}
 	<main class="home-page">
 		<header class="site-header">
-			<a class="brand" href="#top" aria-label="Multiply Mission home">
+			<button class="brand" type="button" onclick={scrollToPageTop} aria-label="Multiply Mission home">
 				<span class="brand-mark"><Rocket size={19} strokeWidth={2.6} /></span>
 				<span>Multiply Mission</span>
-			</a>
+			</button>
 			<div class="header-stats">
 				<div class="mini-stat" title="Tables completed">
 					<Trophy size={17} />
@@ -391,7 +400,7 @@
 			</div>
 		</header>
 
-		<section class="hero" id="top">
+		<section class="hero">
 			<div class="star-field" aria-hidden="true"></div>
 			<div class="hero-copy">
 				<div class="eyebrow"><Sparkles size={15} /> Your multiplication adventure</div>
@@ -559,7 +568,7 @@
 		</section>
 
 		<footer>
-			<a class="brand footer-brand" href="#top"><span class="brand-mark"><Rocket size={17} /></span>Multiply Mission</a>
+			<button class="brand footer-brand" type="button" onclick={scrollToPageTop}><span class="brand-mark"><Rocket size={17} /></span>Multiply Mission</button>
 			<p>Made for curious minds and future math legends.</p>
 		</footer>
 	</main>
