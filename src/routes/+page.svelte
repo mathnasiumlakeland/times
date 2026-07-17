@@ -154,22 +154,48 @@
 		return [first, second];
 	}
 
-	function boostRocket(event: PointerEvent) {
+	function rocketAnimationFrom(event: PointerEvent) {
 		const rocketOrbit = (event.currentTarget as HTMLElement).closest<HTMLElement>('.orbit-rocket');
-		const orbitAnimation = rocketOrbit?.getAnimations().find((animation) => animation.playState === 'running');
+		return rocketOrbit?.getAnimations().find((animation) => animation.playState === 'running');
+	}
+
+	function startRocketAcceleration(event: PointerEvent) {
+		const orbitAnimation = rocketAnimationFrom(event);
 		if (!orbitAnimation) return;
 
 		if (rocketBoostFrame !== undefined) cancelAnimationFrame(rocketBoostFrame);
 
-		const boostStartedAt = performance.now();
-		const burstDuration = 1100;
-		const peakRate = 3.25;
-		orbitAnimation.playbackRate = peakRate;
+		const accelerationStartedAt = performance.now();
+		const startingRate = Math.max(1, orbitAnimation.playbackRate);
+
+		const accelerate = (now: number) => {
+			if (orbitAnimation.playState !== 'running') {
+				rocketBoostFrame = undefined;
+				return;
+			}
+
+			const elapsedSeconds = (now - accelerationStartedAt) / 1000;
+			orbitAnimation.playbackRate = startingRate + Math.log1p(elapsedSeconds * 1.8) * 1.6;
+			rocketBoostFrame = requestAnimationFrame(accelerate);
+		};
+
+		rocketBoostFrame = requestAnimationFrame(accelerate);
+	}
+
+	function releaseRocketAcceleration(event: PointerEvent) {
+		const orbitAnimation = rocketAnimationFrom(event);
+		if (!orbitAnimation) return;
+
+		if (rocketBoostFrame !== undefined) cancelAnimationFrame(rocketBoostFrame);
+
+		const slowdownStartedAt = performance.now();
+		const startingRate = Math.max(1, orbitAnimation.playbackRate);
+		const slowdownDuration = Math.min(1600, 550 + (startingRate - 1) * 180);
 
 		const settleToCruise = (now: number) => {
-			const progress = Math.min((now - boostStartedAt) / burstDuration, 1);
+			const progress = Math.min((now - slowdownStartedAt) / slowdownDuration, 1);
 			const easedProgress = 1 - Math.pow(1 - progress, 3);
-			orbitAnimation.playbackRate = peakRate + (1 - peakRate) * easedProgress;
+			orbitAnimation.playbackRate = startingRate + (1 - startingRate) * easedProgress;
 
 			if (progress < 1) {
 				rocketBoostFrame = requestAnimationFrame(settleToCruise);
@@ -393,7 +419,15 @@
 					<span class="planet-crater crater-two"></span>
 				</div>
 				<div class="orbiter orbit-rocket">
-					<span class="orbit-facing rocket-wrap" role="presentation" onpointerenter={boostRocket}><span class="rocket-icon"><Rocket size={57} strokeWidth={2.1} /></span></span>
+					<span
+						class="orbit-facing rocket-wrap"
+						role="presentation"
+						onpointerenter={startRocketAcceleration}
+						onpointerleave={releaseRocketAcceleration}
+						onpointercancel={releaseRocketAcceleration}
+					>
+						<span class="rocket-icon"><Rocket size={57} strokeWidth={2.1} /></span>
+					</span>
 				</div>
 				<div class="orbiter orbit-problem orbit-problem-one">
 					<span class="orbit-facing"><span class="math-spark">{orbitProblems[0]}</span></span>

@@ -82,7 +82,7 @@ p { text-wrap: pretty; }
 .orbit-facing { position: absolute; left: 50%; top: 0; display: grid; place-items: center; transform: translate(-50%, -50%); animation: orbitCounterSpin var(--orbit-duration) linear var(--orbit-delay) infinite; pointer-events: auto; will-change: transform; }
 .orbit-red { --orbit-inset: 13%; --orbit-duration: 18s; --orbit-delay: -14s; --orbit-start: 280deg; --counter-start: -280deg; }
 .orbit-blue { --orbit-inset: 2%; --orbit-duration: 27s; --orbit-delay: -12s; --orbit-start: 160deg; --counter-start: -160deg; }
-.orbit-rocket { --orbit-inset: 2%; --orbit-duration: 36s; --orbit-delay: -4s; --orbit-start: 40deg; --counter-start: -40deg; }
+.orbit-rocket { --orbit-inset: 2%; --orbit-duration: 36s; --orbit-delay: -4s; --orbit-start: 40deg; --counter-start: -40deg; z-index: 5; }
 .orbit-problem-one { --orbit-inset: 2%; --orbit-duration: 44s; --orbit-delay: -34s; --orbit-start: 278deg; --counter-start: -278deg; }
 .orbit-problem-two { --orbit-inset: 2%; --orbit-duration: 50s; --orbit-delay: -18s; --orbit-start: 130deg; --counter-start: -130deg; }
 .orbit-dot { display: block; width: 19px; aspect-ratio: 1; border-radius: 50%; background: var(--coral); box-shadow: 0 0 20px rgba(255,98,98,.5); transition-property: transform, filter; transition-duration: 180ms; transition-timing-function: cubic-bezier(.2,0,0,1); }
