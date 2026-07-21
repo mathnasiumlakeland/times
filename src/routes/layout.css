@@ -211,6 +211,29 @@ footer { min-height: 120px; padding: 30px max(clamp(20px, 7vw, 110px), env(safe-
 .feedback-line .yes { color: var(--lime); }
 .feedback-line .nope { color: #ff8c8c; }
 
+.coach-layer { position: fixed; inset: 0; z-index: 20; padding: max(22px, env(safe-area-inset-top)) max(22px, env(safe-area-inset-right)) max(22px, env(safe-area-inset-bottom)) max(22px, env(safe-area-inset-left)); display: grid; place-items: center; background: rgba(4,9,24,.78); backdrop-filter: blur(12px); animation: coachBackdropIn .22s ease both; }
+.coach-panel { width: min(680px, 100%); max-height: 100%; overflow-y: auto; padding: clamp(28px, 5vw, 46px); border-radius: 30px; color: var(--ink); background: var(--paper); box-shadow: 0 32px 100px rgba(0,0,0,.48); animation: coachIn .34s cubic-bezier(.2,.8,.2,1) both; }
+.coach-heading { display: flex; align-items: center; gap: 16px; }
+.coach-mark { flex: 0 0 auto; width: 48px; height: 48px; display: grid; place-items: center; border-radius: 15px; color: var(--deep); background: var(--lime); box-shadow: 0 4px 0 #93a900; transform: rotate(-5deg); }
+.coach-heading > div { min-width: 0; }
+.coach-heading span:not(.coach-mark) { display: block; margin-bottom: 4px; color: #7862e2; text-transform: uppercase; letter-spacing: .12em; font-size: 10px; font-weight: 800; }
+.coach-heading h2 { font-size: clamp(30px, 5vw, 43px); line-height: 1; letter-spacing: -.05em; }
+.coach-panel > p { max-width: 570px; margin-top: 17px; color: #666e80; font-size: 16px; line-height: 1.5; }
+.coach-example { position: relative; margin-top: 25px; padding: 23px; overflow: hidden; border-radius: 22px; color: white; background: var(--deep); animation: coachExampleIn .25s ease both; }
+.coach-example::after { content: ''; position: absolute; width: 150px; height: 150px; right: -70px; top: -80px; border: 18px solid rgba(214,242,71,.08); border-radius: 50%; pointer-events: none; }
+.coach-example-top { position: relative; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 20px; padding-bottom: 18px; border-bottom: 1px solid rgba(255,255,255,.1); }
+.coach-example-top span { color: #929db5; text-transform: uppercase; letter-spacing: .1em; font-size: 10px; font-weight: 800; }
+.coach-example-top strong { white-space: nowrap; color: var(--lime); font-family: 'Space Grotesk'; font-size: 29px; font-variant-numeric: tabular-nums; }
+.coach-steps { position: relative; z-index: 1; margin: 20px 0; padding: 0; display: grid; gap: 11px; list-style: none; }
+.coach-steps li { display: grid; grid-template-columns: 30px 1fr; align-items: center; gap: 11px; opacity: 0; animation: coachStepIn .32s calc(80ms + var(--step) * 75ms) ease forwards; }
+.coach-steps li > span { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 9px; color: var(--deep); background: var(--lime); font-size: 12px; font-weight: 900; }
+.coach-steps p { color: #e0e5f1; font-size: 15px; line-height: 1.4; }
+.coach-result { position: relative; z-index: 1; padding-top: 17px; display: flex; align-items: center; justify-content: space-between; gap: 18px; border-top: 1px solid rgba(255,255,255,.1); }
+.coach-result span { color: #929db5; font-size: 12px; font-weight: 700; }
+.coach-result strong { color: white; font-family: 'Space Grotesk'; font-size: 20px; font-variant-numeric: tabular-nums; }
+.coach-actions { margin-top: 23px; display: flex; gap: 11px; }
+.coach-actions button:first-child { flex: 1; }
+
 .result-page { display: grid; place-items: center; padding: max(30px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(30px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left)); }
 .result-card { position: relative; z-index: 2; width: min(590px, 100%); padding: clamp(34px, 6vw, 60px); overflow: hidden; border-radius: 32px; background: var(--paper); color: var(--ink); text-align: center; box-shadow: 0 30px 90px rgba(0,0,0,.35); animation: resultIn .55s ease both; }
 .result-burst { position: absolute; left: 50%; top: 0; width: 430px; height: 240px; transform: translate(-50%, -45%); border-radius: 50%; background: var(--lime); opacity: .16; filter: blur(1px); }
@@ -237,6 +260,10 @@ footer { min-height: 120px; padding: 30px max(clamp(20px, 7vw, 110px), env(safe-
 @keyframes pop { 0% { transform: rotate(3deg) scale(.7); } 70% { transform: rotate(-3deg) scale(1.1); } 100% { transform: rotate(3deg) scale(1); } }
 @keyframes resultIn { from { opacity: 0; transform: translateY(20px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
 @keyframes badgeIn { from { opacity: 0; transform: scale(.4) rotate(-25deg); } to { opacity: 1; transform: scale(1) rotate(0); } }
+@keyframes coachBackdropIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes coachIn { from { opacity: 0; transform: translateY(18px) scale(.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes coachExampleIn { from { opacity: 0; transform: translateX(10px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes coachStepIn { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: translateY(0); } }
 
 @media (max-width: 900px) {
 	.hero { grid-template-columns: 1fr 1fr; padding-left: max(40px, env(safe-area-inset-left)); padding-right: max(40px, env(safe-area-inset-right)); }
@@ -296,6 +323,22 @@ footer { min-height: 120px; padding: 30px max(clamp(20px, 7vw, 110px), env(safe-
 	.hard-input-wrap { width: 100%; }
 	.hard-input-wrap input { height: 85px; font-size: 38px; }
 	.hard-answer-form > button { width: 100%; }
+	.coach-layer { padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); }
+	.coach-panel { padding: 26px 18px; border-radius: 24px; }
+	.coach-heading { align-items: start; gap: 13px; }
+	.coach-mark { width: 43px; height: 43px; border-radius: 13px; }
+	.coach-heading h2 { font-size: 30px; }
+	.coach-panel > p { margin-top: 14px; font-size: 14px; }
+	.coach-example { margin-top: 19px; padding: 18px 15px; border-radius: 18px; }
+	.coach-example-top { align-items: end; }
+	.coach-example-top span { max-width: 100px; }
+	.coach-example-top strong { font-size: 25px; }
+	.coach-steps { margin: 17px 0; gap: 9px; }
+	.coach-steps p { font-size: 14px; }
+	.coach-result { align-items: end; }
+	.coach-result strong { font-size: 17px; }
+	.coach-actions { flex-direction: column; }
+	.coach-actions button { width: 100%; }
 	.result-card { padding: 36px 20px; border-radius: 25px; }
 	.result-actions { flex-direction: column; }
 	.result-actions button { width: 100%; }

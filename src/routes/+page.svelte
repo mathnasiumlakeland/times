@@ -8,12 +8,14 @@
 		Flame,
 		Home,
 		Keyboard,
+		Lightbulb,
 		LockKeyhole,
 		Medal,
 		MousePointer2,
 		Crown,
 		Rocket,
 		RotateCcw,
+		RefreshCw,
 		Sparkles,
 		Star,
 		Target,
@@ -21,6 +23,7 @@
 		X
 	} from 'lucide-svelte';
 	import Button from '$lib/components/ui/button/Button.svelte';
+	import { makePracticeExample, type PracticeExample } from '$lib/practice-strategies';
 
 	type GameMode = 'home' | 'quiz' | 'result';
 	type Difficulty = 'easy' | 'hard';
@@ -73,6 +76,9 @@
 	let hardInputStatus = $state<'idle' | 'wrong' | 'correct'>('idle');
 	let hardInput = $state<HTMLInputElement>();
 	let feedback = $state<'correct' | 'wrong' | null>(null);
+	let wrongAttemptCount = $state(0);
+	let coachOpen = $state(false);
+	let coachExample = $state<PracticeExample | null>(null);
 	let orbitProblems = $state<[string, string]>(['7 × 8', '12 × 4']);
 	let progress = $state<Progress>({ completed: [], hardCompleted: [], bestScores: {}, hardBestScores: {}, totalStars: 0 });
 	let rocketBoostFrame: number | undefined;
@@ -243,6 +249,9 @@
 		typedAnswer = undefined;
 		hardInputStatus = 'idle';
 		feedback = null;
+		wrongAttemptCount = 0;
+		coachOpen = false;
+		coachExample = null;
 		mode = 'quiz';
 		window.scrollTo({ top: 0, behavior: 'smooth' });
 		focusHardInput();
@@ -266,8 +275,24 @@
 		return (selectedDifficulty === 'hard' ? progress.hardBestScores : progress.bestScores)[table];
 	}
 
+	function openCoach() {
+		coachExample = makePracticeExample(currentQuestion.table, currentQuestion.multiplier);
+		coachOpen = true;
+		hardInput?.blur();
+		void tick().then(() => document.querySelector<HTMLButtonElement>('.coach-primary')?.focus());
+	}
+
+	function refreshCoachExample() {
+		coachExample = makePracticeExample(currentQuestion.table, currentQuestion.multiplier);
+	}
+
+	function closeCoach() {
+		coachOpen = false;
+		focusHardInput();
+	}
+
 	function chooseAnswer(answer: number) {
-		if (feedback === 'correct' || wrongAnswers.includes(answer)) return;
+		if (feedback === 'correct' || (sessionDifficulty === 'easy' && wrongAnswers.includes(answer))) return;
 		if (answer === correctAnswer) {
 			playSound('correct');
 			feedback = 'correct';
@@ -282,8 +307,10 @@
 			playSound('incorrect');
 			feedback = 'wrong';
 			hardInputStatus = 'wrong';
-			wrongAnswers = [...wrongAnswers, answer];
+			if (!wrongAnswers.includes(answer)) wrongAnswers = [...wrongAnswers, answer];
+			wrongAttemptCount += 1;
 			streak = 0;
+			if (wrongAttemptCount % 2 === 0) openCoach();
 		}
 	}
 
@@ -318,6 +345,9 @@
 		typedAnswer = undefined;
 		hardInputStatus = 'idle';
 		feedback = null;
+		wrongAttemptCount = 0;
+		coachOpen = false;
+		coachExample = null;
 		focusHardInput();
 	}
 
@@ -360,11 +390,16 @@
 	}
 
 	function goHome() {
+		coachOpen = false;
 		mode = 'home';
 		scrollToPageTop();
 	}
 
 	function handleKeydown(event: KeyboardEvent) {
+		if (coachOpen) {
+			if (event.key === 'Escape') closeCoach();
+			return;
+		}
 		if (mode !== 'quiz' || sessionDifficulty === 'hard' || feedback === 'correct') return;
 		const number = Number(event.key);
 		if (number >= 1 && number <= answerOptions.length) chooseAnswer(answerOptions[number - 1]);
@@ -636,11 +671,46 @@
 				</form>
 			{/if}
 
-			<div class="feedback-line" aria-live="polite">
-				{#if feedback === 'correct'}<span class="yes"><Sparkles size={18} /> Nailed it!</span>{:else if feedback === 'wrong'}<span class="nope">Not that one — try again!</span>{:else}<span>{sessionDifficulty === 'hard' ? 'Press Enter to check' : 'Press 1–4 on your keyboard'}</span>{/if}
-			</div>
-		</section>
-	</main>
+				<div class="feedback-line" aria-live="polite">
+					{#if feedback === 'correct'}<span class="yes"><Sparkles size={18} /> Nailed it!</span>{:else if feedback === 'wrong'}<span class="nope">{wrongAttemptCount === 1 ? 'Not that one — try once more!' : 'Not yet — use the shortcut, then try again!'}</span>{:else}<span>{sessionDifficulty === 'hard' ? 'Press Enter to check' : 'Press 1–4 on your keyboard'}</span>{/if}
+				</div>
+			</section>
+
+			{#if coachOpen && coachExample}
+				<div class="coach-layer">
+					<div class="coach-panel" role="dialog" aria-modal="true" aria-labelledby="coach-title" aria-describedby="coach-description">
+						<div class="coach-heading">
+							<span class="coach-mark"><Lightbulb size={22} strokeWidth={2.4} /></span>
+							<div>
+								<span>Mission Coach · ×{coachExample.table}</span>
+								<h2 id="coach-title">{coachExample.strategyName}</h2>
+							</div>
+						</div>
+						<p id="coach-description">{coachExample.strategySummary}</p>
+
+						{#key `${coachExample.table}-${coachExample.multiplier}`}
+							<div class="coach-example">
+								<div class="coach-example-top">
+									<span>Practice a different one</span>
+									<strong>{coachExample.table} × {coachExample.multiplier}</strong>
+								</div>
+								<ol class="coach-steps">
+									{#each coachExample.steps as step, index (step)}
+										<li style:--step={index}><span>{index + 1}</span><p>{step}</p></li>
+									{/each}
+								</ol>
+								<div class="coach-result"><span>That gives</span><strong>{coachExample.table} × {coachExample.multiplier} = {coachExample.answer}</strong></div>
+							</div>
+						{/key}
+
+						<div class="coach-actions">
+							<Button class="coach-primary" onclick={closeCoach}>Try my problem again <ArrowRight size={18} /></Button>
+							<Button variant="secondary" onclick={refreshCoachExample}><RefreshCw size={17} /> Another example</Button>
+						</div>
+					</div>
+				</div>
+			{/if}
+		</main>
 {:else}
 	<main class="result-page">
 		<div class="result-stars" aria-hidden="true"></div>
