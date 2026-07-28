@@ -121,6 +121,7 @@ export class MidiPlayer {
 	private music?: ReturnType<typeof parseMidi>;
 	private timer?: number;
 	private sources = new Set<AudioScheduledSourceNode>();
+	private iosMediaBridge?: HTMLAudioElement;
 
 	async load(url: string) {
 		const response = await fetch(url);
@@ -130,6 +131,8 @@ export class MidiPlayer {
 
 	async play() {
 		if (!this.music) throw new Error('Music has not loaded yet.');
+		this.requestPlaybackAudioSession();
+		this.startIosMediaBridge();
 		this.context ??= new AudioContext();
 		await this.context.resume();
 		this.stop();
@@ -141,6 +144,7 @@ export class MidiPlayer {
 		this.timer = undefined;
 		for (const source of this.sources) source.stop();
 		this.sources.clear();
+		this.iosMediaBridge?.pause();
 	}
 
 	destroy() {
@@ -188,5 +192,23 @@ export class MidiPlayer {
 	private trackSource(source: AudioScheduledSourceNode) {
 		this.sources.add(source);
 		source.onended = () => this.sources.delete(source);
+	}
+
+	private requestPlaybackAudioSession() {
+		const navigatorWithAudioSession = navigator as Navigator & {
+			audioSession?: { type: 'auto' | 'playback' | 'transient' | 'transient-solo' | 'ambient' | 'play-and-record' };
+		};
+		if (navigatorWithAudioSession.audioSession) navigatorWithAudioSession.audioSession.type = 'playback';
+	}
+
+	private startIosMediaBridge() {
+		const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent);
+		if (!isIos) return;
+		this.iosMediaBridge ??= new Audio('/audio/duolingo-correct.mp3');
+		this.iosMediaBridge.loop = true;
+		this.iosMediaBridge.volume = 0;
+		void this.iosMediaBridge.play().catch(() => {
+			// The Audio Session API above is the primary path on current Safari.
+		});
 	}
 }
