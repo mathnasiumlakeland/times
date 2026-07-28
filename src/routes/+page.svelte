@@ -11,6 +11,7 @@
 		Lightbulb,
 		LockKeyhole,
 		Medal,
+		Music,
 		MousePointer2,
 		Crown,
 		Rocket,
@@ -20,9 +21,12 @@
 		Star,
 		Target,
 		Trophy,
+		Volume2,
+		VolumeX,
 		X
 	} from 'lucide-svelte';
 	import Button from '$lib/components/ui/button/Button.svelte';
+	import { MidiPlayer } from '$lib/midi-player';
 	import { makePracticeExample, type PracticeExample } from '$lib/practice-strategies';
 
 	type GameMode = 'home' | 'quiz' | 'result';
@@ -45,6 +49,7 @@
 		complete: '/audio/duolingo-complete.mp3'
 	};
 	const sounds: Partial<Record<SoundName, HTMLAudioElement>> = {};
+	const backgroundMusicUrl = '/audio/kk-slider-aircheck.mid';
 	const badgeNames = [
 		'First Orbit',
 		'Double Trouble',
@@ -82,6 +87,8 @@
 	let orbitProblems = $state<[string, string]>(['7 × 8', '12 × 4']);
 	let progress = $state<Progress>({ completed: [], hardCompleted: [], bestScores: {}, hardBestScores: {}, totalStars: 0 });
 	let rocketBoostFrame: number | undefined;
+	let musicPlayer: MidiPlayer | undefined;
+	let musicStatus = $state<'off' | 'loading' | 'playing' | 'unavailable'>('loading');
 
 	let currentQuestion = $derived(questions[questionIndex] ?? { table: activeTable, multiplier: 1 });
 	let correctAnswer = $derived(currentQuestion.table * currentQuestion.multiplier);
@@ -110,6 +117,11 @@
 
 	onMount(() => {
 		orbitProblems = makeOrbitProblems();
+		musicPlayer = new MidiPlayer();
+		void musicPlayer.load(backgroundMusicUrl).then(
+			() => musicStatus = 'off',
+			() => musicStatus = 'unavailable'
+		);
 
 		for (const [name, url] of Object.entries(soundUrls) as [SoundName, string][]) {
 			const audio = new Audio(url);
@@ -132,6 +144,8 @@
 				localStorage.removeItem('multiply-mission-progress');
 			}
 		}
+
+		return () => musicPlayer?.destroy();
 	});
 
 	function playSound(name: SoundName) {
@@ -141,6 +155,22 @@
 		void audio.play().catch(() => {
 			// Audio can be blocked until the first user interaction; gameplay continues silently.
 		});
+	}
+
+	async function toggleBackgroundMusic() {
+		if (!musicPlayer || musicStatus === 'loading' || musicStatus === 'unavailable') return;
+		if (musicStatus === 'playing') {
+			musicPlayer.stop();
+			musicStatus = 'off';
+			return;
+		}
+
+		try {
+			await musicPlayer.play();
+			musicStatus = 'playing';
+		} catch {
+			musicStatus = 'unavailable';
+		}
 	}
 
 	function shuffled<T>(items: T[]) {
@@ -415,6 +445,30 @@
 </svelte:head>
 
 <svelte:window onkeydown={handleKeydown} />
+
+<button
+	class:playing={musicStatus === 'playing'}
+	class="music-toggle"
+	type="button"
+	onclick={toggleBackgroundMusic}
+	disabled={musicStatus === 'loading' || musicStatus === 'unavailable'}
+	aria-pressed={musicStatus === 'playing'}
+	aria-label={musicStatus === 'playing' ? 'Turn background music off' : 'Turn background music on'}
+>
+	{#if musicStatus === 'playing'}
+		<Volume2 size={20} strokeWidth={2.5} />
+		<span>Music on</span>
+	{:else if musicStatus === 'loading'}
+		<Music size={20} strokeWidth={2.5} />
+		<span>Loading music</span>
+	{:else if musicStatus === 'unavailable'}
+		<VolumeX size={20} strokeWidth={2.5} />
+		<span>Music unavailable</span>
+	{:else}
+		<VolumeX size={20} strokeWidth={2.5} />
+		<span>Music off</span>
+	{/if}
+</button>
 
 {#if mode === 'home'}
 	<main class="home-page">
