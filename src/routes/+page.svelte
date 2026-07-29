@@ -51,8 +51,8 @@
 		'click-release': '/audio/click-release.wav'
 	};
 	const soundVolumes: Partial<Record<SoundName, number>> = {
-		click: 0.25,
-		'click-release': 0.25
+		click: 0.13125,
+		'click-release': 0.13125
 	};
 	const sounds: Partial<Record<SoundName, HTMLAudioElement>> = {};
 	const backgroundMusicUrl = '/audio/kk-slider-aircheck.mid';
