@@ -26,7 +26,7 @@
 		X
 	} from 'lucide-svelte';
 	import Button from '$lib/components/ui/button/Button.svelte';
-	import { triggerHaptic } from '$lib/haptics';
+	import { destroyHaptics, triggerHaptic } from '$lib/haptics';
 	import { MidiPlayer } from '$lib/midi-player';
 	import { makePracticeExample, type PracticeExample } from '$lib/practice-strategies';
 
@@ -153,7 +153,10 @@
 			}
 		}
 
-		return () => musicPlayer?.destroy();
+		return () => {
+			musicPlayer?.destroy();
+			destroyHaptics();
+		};
 	});
 
 	function playSound(name: SoundName) {
@@ -332,7 +335,9 @@
 	function chooseAnswer(answer: number) {
 		if (feedback === 'correct' || (sessionDifficulty === 'easy' && wrongAnswers.includes(answer))) return;
 		if (answer === correctAnswer) {
-			playSound('correct');
+			const isFinalQuestion = questionIndex >= totalQuestions - 1;
+			playSound(isFinalQuestion ? 'complete' : 'correct');
+			if (isFinalQuestion) triggerHaptic('success');
 			feedback = 'correct';
 			hardInputStatus = 'correct';
 			if (wrongAnswers.length === 0) {
@@ -340,7 +345,7 @@
 				streak += 1;
 				bestStreak = Math.max(bestStreak, streak);
 			}
-			setTimeout(nextQuestion, 700);
+			setTimeout(isFinalQuestion ? finishQuiz : nextQuestion, 700);
 		} else {
 			playSound('incorrect');
 			feedback = 'wrong';
@@ -390,8 +395,6 @@
 	}
 
 	function finishQuiz() {
-		playSound('complete');
-		triggerHaptic('success');
 		const finalScore = score;
 		const stars = finalScore >= 9 ? 3 : finalScore >= 7 ? 2 : finalScore >= 5 ? 1 : 0;
 		const isCompleted = stars > 0;
