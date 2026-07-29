@@ -32,7 +32,7 @@
 	type GameMode = 'home' | 'quiz' | 'result';
 	type Difficulty = 'easy' | 'hard';
 	type Question = { table: number; multiplier: number };
-	type SoundName = 'correct' | 'incorrect' | 'complete';
+	type SoundName = 'correct' | 'incorrect' | 'complete' | 'click' | 'click-release';
 	type Progress = {
 		completed: number[];
 		hardCompleted: number[];
@@ -46,7 +46,13 @@
 	const soundUrls: Record<SoundName, string> = {
 		correct: '/audio/duolingo-correct.mp3',
 		incorrect: '/audio/duolingo-incorrect.mp3',
-		complete: '/audio/duolingo-complete.mp3'
+		complete: '/audio/duolingo-complete.mp3',
+		click: '/audio/click.wav',
+		'click-release': '/audio/click-release.wav'
+	};
+	const soundVolumes: Partial<Record<SoundName, number>> = {
+		click: 0.25,
+		'click-release': 0.25
 	};
 	const sounds: Partial<Record<SoundName, HTMLAudioElement>> = {};
 	const backgroundMusicUrl = '/audio/kk-slider-aircheck.mid';
@@ -126,6 +132,7 @@
 		for (const [name, url] of Object.entries(soundUrls) as [SoundName, string][]) {
 			const audio = new Audio(url);
 			audio.preload = 'auto';
+			audio.volume = soundVolumes[name] ?? 1;
 			sounds[name] = audio;
 		}
 
@@ -450,6 +457,9 @@
 	class:playing={musicStatus === 'playing'}
 	class="music-toggle"
 	type="button"
+	onpointerdown={() => playSound('click')}
+	onpointerup={() => playSound('click-release')}
+	onpointercancel={() => playSound('click-release')}
 	onclick={toggleBackgroundMusic}
 	disabled={musicStatus === 'loading' || musicStatus === 'unavailable'}
 	aria-pressed={musicStatus === 'playing'}
