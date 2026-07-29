@@ -26,6 +26,7 @@
 		X
 	} from 'lucide-svelte';
 	import Button from '$lib/components/ui/button/Button.svelte';
+	import { triggerHaptic } from '$lib/haptics';
 	import { MidiPlayer } from '$lib/midi-player';
 	import { makePracticeExample, type PracticeExample } from '$lib/practice-strategies';
 
@@ -390,6 +391,7 @@
 
 	function finishQuiz() {
 		playSound('complete');
+		triggerHaptic('success');
 		const finalScore = score;
 		const stars = finalScore >= 9 ? 3 : finalScore >= 7 ? 2 : finalScore >= 5 ? 1 : 0;
 		const isCompleted = stars > 0;
@@ -441,6 +443,12 @@
 		const number = Number(event.key);
 		if (number >= 1 && number <= answerOptions.length) chooseAnswer(answerOptions[number - 1]);
 	}
+
+	function handleButtonPressHaptic(event: PointerEvent) {
+		if (event.pointerType === 'mouse' || !(event.target instanceof Element)) return;
+		const button = event.target.closest('button');
+		if (button instanceof HTMLButtonElement && !button.disabled) triggerHaptic('tap');
+	}
 </script>
 
 <svelte:head>
@@ -452,6 +460,7 @@
 </svelte:head>
 
 <svelte:window onkeydown={handleKeydown} />
+<svelte:document onpointerdown={handleButtonPressHaptic} />
 
 <button
 	class:playing={musicStatus === 'playing'}
