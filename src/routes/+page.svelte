@@ -26,7 +26,7 @@
 		X
 	} from 'lucide-svelte';
 	import Button from '$lib/components/ui/button/Button.svelte';
-	import { destroyHaptics, triggerHaptic } from '$lib/haptics';
+	import { destroyHaptics, initializeHaptics, triggerHaptic } from '$lib/haptics';
 	import { MidiPlayer } from '$lib/midi-player';
 	import { makePracticeExample, type PracticeExample } from '$lib/practice-strategies';
 
@@ -123,6 +123,7 @@
 	});
 
 	onMount(() => {
+		initializeHaptics();
 		orbitProblems = makeOrbitProblems();
 		musicPlayer = new MidiPlayer();
 		void musicPlayer.load(backgroundMusicUrl).then(
@@ -448,7 +449,7 @@
 	}
 
 	function handleButtonPressHaptic(event: PointerEvent) {
-		if (event.pointerType === 'mouse' || !(event.target instanceof Element)) return;
+		if (!event.isTrusted || event.pointerType === 'mouse' || !(event.target instanceof Element)) return;
 		const button = event.target.closest('button');
 		if (button instanceof HTMLButtonElement && !button.disabled) triggerHaptic('tap');
 	}

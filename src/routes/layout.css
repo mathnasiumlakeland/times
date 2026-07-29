@@ -24,6 +24,7 @@ body { width: 100%; min-width: 0; min-height: 100vh; min-height: 100dvh; margin:
 .home-page { width: 100%; min-width: 0; overflow-x: hidden; overflow-x: clip; background: var(--paper); }
 button, a { -webkit-tap-highlight-color: transparent; }
 button:focus-visible, a:focus-visible { outline: 3px solid #7b67ee; outline-offset: 3px; }
+button.haptic-pressed:not(:disabled) { transform: scale(.96) !important; }
 h1, h2, h3, p { margin: 0; }
 h1, h2, h3, .brand, .equation { font-family: 'Space Grotesk', sans-serif; }
 h1, h2, h3 { text-wrap: balance; }
