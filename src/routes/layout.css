@@ -103,6 +103,20 @@ p { text-wrap: pretty; }
 .rocket-wrap:hover .rocket-icon { transform: rotate(36deg) scale(1.1); filter: drop-shadow(0 0 11px rgba(255,255,255,.35)); }
 
 .mission-section { padding: 105px max(clamp(20px, 7vw, 110px), env(safe-area-inset-right)) 120px max(clamp(20px, 7vw, 110px), env(safe-area-inset-left)); }
+.play-mode-hub { padding: 100px max(clamp(20px, 7vw, 110px), env(safe-area-inset-right)) 64px max(clamp(20px, 7vw, 110px), env(safe-area-inset-left)); display: grid; grid-template-columns: minmax(260px, .72fr) minmax(520px, 1.28fr); align-items: end; gap: clamp(35px, 6vw, 90px); background: var(--paper); }
+.play-mode-heading { max-width: 510px; }
+.play-mode-heading h2 { font-size: clamp(38px, 4.7vw, 61px); line-height: 1; letter-spacing: -.055em; }
+.play-mode-heading p { max-width: 450px; margin-top: 18px; color: #72798a; font-size: 16px; line-height: 1.55; }
+.play-mode-tabs { padding: 10px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 9px; border-radius: 27px; background: var(--navy); box-shadow: 0 17px 40px rgba(16,26,51,.14); }
+.play-mode-tabs button { position: relative; min-height: 112px; padding: 18px 18px 18px 76px; cursor: pointer; border: 0; border-radius: 18px; color: #9aa4bb; background: transparent; text-align: left; transition-property: transform, color, background-color, box-shadow; transition-duration: 180ms; transition-timing-function: cubic-bezier(.2,0,0,1); }
+.play-mode-tabs button:hover { color: white; background: rgba(255,255,255,.07); transform: translateY(-2px); }
+.play-mode-tabs button:active { transform: scale(.96); }
+.play-mode-tabs button.selected { color: var(--deep); background: var(--lime); box-shadow: 0 6px 0 #829600; }
+.play-mode-tabs button > span { position: absolute; left: 17px; top: 50%; width: 44px; height: 44px; display: grid; place-items: center; border-radius: 13px; color: white; background: rgba(255,255,255,.09); transform: translateY(-50%); }
+.play-mode-tabs button.selected > span { color: var(--deep); background: rgba(16,26,51,.1); }
+.play-mode-tabs strong, .play-mode-tabs small { display: block; }
+.play-mode-tabs strong { font-family: 'Space Grotesk'; font-size: 16px; }
+.play-mode-tabs small { margin-top: 5px; color: currentColor; font-size: 11px; line-height: 1.35; opacity: .67; text-wrap: pretty; }
 .section-heading { display: flex; align-items: end; justify-content: space-between; gap: 40px; margin-bottom: 42px; }
 .section-kicker { color: #7a62e7; margin-bottom: 12px; }
 .section-heading h2, .badge-intro h2 { font-size: clamp(36px, 5vw, 64px); line-height: 1; letter-spacing: -.055em; }
@@ -141,6 +155,34 @@ p { text-wrap: pretty; }
 .launch-selection strong { font-family: 'Space Grotesk'; font-size: 38px; line-height: 1; color: var(--lime); font-variant-numeric: tabular-nums; }
 .launch-selection span { margin-top: 5px; color: #8d97ad; font-size: 11px; font-weight: 700; }
 .launch-selection button { width: 100%; }
+.challenge-panel { position: relative; isolation: isolate; margin-bottom: 72px; padding: clamp(25px, 4.5vw, 52px); display: grid; grid-template-columns: minmax(0, .88fr) minmax(390px, 1.12fr); align-items: center; gap: clamp(28px, 5vw, 70px); overflow: hidden; border-radius: 30px; color: white; background: #171335; box-shadow: 0 22px 55px rgba(16,26,51,.17); }
+.challenge-panel::before { content: ''; position: absolute; z-index: -1; width: 480px; aspect-ratio: 1; right: -150px; top: -210px; border: 48px solid rgba(141,117,255,.1); border-radius: 50%; box-shadow: 0 0 0 60px rgba(167,221,237,.035); }
+.challenge-panel.unlocked::after { content: ''; position: absolute; z-index: -1; left: -90px; bottom: -180px; width: 330px; aspect-ratio: 1; border-radius: 50%; background: rgba(214,242,71,.055); filter: blur(1px); }
+.challenge-copy { min-width: 0; }
+.challenge-kicker { display: inline-flex; align-items: center; gap: 7px; margin-bottom: 15px; color: var(--sky); text-transform: uppercase; letter-spacing: .13em; font-size: 11px; font-weight: 800; }
+.challenge-panel.unlocked .challenge-kicker { color: var(--lime); }
+.challenge-copy h3 { max-width: 470px; font-size: clamp(36px, 4.6vw, 59px); line-height: .98; letter-spacing: -.055em; }
+.challenge-copy > p { max-width: 510px; margin-top: 17px; color: #b3bdd2; font-size: 16px; line-height: 1.55; }
+.unlock-progress { margin-top: 25px; }
+.unlock-track { max-width: 360px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
+.unlock-track span { height: 8px; border-radius: 99px; background: rgba(255,255,255,.11); box-shadow: inset 0 1px 1px rgba(0,0,0,.18); }
+.unlock-track span.filled { background: var(--lime); box-shadow: 0 0 12px rgba(214,242,71,.23); }
+.unlock-progress > strong { display: block; margin-top: 9px; color: #8994ad; text-transform: uppercase; letter-spacing: .1em; font-size: 10px; }
+.challenge-rules { margin-top: 24px; display: flex; flex-wrap: wrap; gap: 10px 18px; color: #909bb4; font-size: 12px; }
+.challenge-rules > span { display: inline-flex; align-items: center; gap: 7px; }
+.challenge-rules svg { color: var(--sky); }
+.challenge-rules strong { color: white; }
+.challenge-actions { margin-top: 27px; display: flex; align-items: center; flex-wrap: wrap; gap: 14px; }
+.challenge-actions > span { color: #8994ad; font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.challenge-preview { position: relative; min-width: 0; padding: 8px; border-radius: 32px; background: rgba(255,255,255,.055); box-shadow: 0 0 0 1px rgba(255,255,255,.07), 0 22px 45px rgba(0,0,0,.24); }
+.preview-label { position: absolute; z-index: 4; left: 25px; right: 25px; top: 22px; display: flex; align-items: center; justify-content: space-between; pointer-events: none; }
+.preview-label span { color: #8590aa; text-transform: uppercase; letter-spacing: .11em; font-size: 9px; font-weight: 800; }
+.preview-label strong { color: var(--sky); font-family: 'Space Grotesk'; font-size: 12px; letter-spacing: .08em; }
+.challenge-panel.unlocked .preview-label strong { color: var(--coral); }
+.preview-shields { position: absolute; z-index: 4; left: 25px; right: 25px; bottom: 22px; display: flex; align-items: center; justify-content: space-between; gap: 12px; pointer-events: none; }
+.preview-shields > span { color: #8590aa; text-transform: uppercase; letter-spacing: .1em; font-size: 9px; font-weight: 800; }
+.preview-shields > div { display: flex; gap: 4px; }
+.preview-shields i { width: 18px; height: 5px; border-radius: 99px; background: var(--violet); box-shadow: 0 0 7px rgba(141,117,255,.35); }
 .solo-heading { margin-bottom: 23px; display: flex; align-items: end; justify-content: space-between; gap: 30px; }
 .solo-heading .section-kicker { margin-bottom: 7px; }
 .solo-heading h3 { margin: 0; font-size: clamp(25px, 3vw, 35px); letter-spacing: -.045em; }
@@ -175,6 +217,7 @@ footer { min-height: 120px; padding: 30px max(clamp(20px, 7vw, 110px), env(safe-
 .footer-brand { color: white; }
 
 .game-page, .result-page { position: relative; width: 100%; max-width: 100%; min-height: 100svh; min-height: 100dvh; overflow: hidden; overflow-x: clip; color: white; background: var(--deep); }
+.challenge-page { overflow-y: auto; }
 .game-header { position: relative; z-index: 2; width: min(900px, calc(100% - 40px)); min-height: calc(84px + env(safe-area-inset-top)); margin: auto; padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left); display: grid; grid-template-columns: 48px 1fr 70px; align-items: center; gap: 20px; }
 .game-progress-wrap { max-width: 660px; width: 100%; justify-self: center; }
 .game-label { margin-bottom: 8px; display: flex; justify-content: space-between; color: #8c96ad; text-transform: uppercase; letter-spacing: .1em; font-size: 10px; font-weight: 800; }
@@ -182,7 +225,67 @@ footer { min-height: 120px; padding: 30px max(clamp(20px, 7vw, 110px), env(safe-
 .game-progress span { display: block; height: 100%; border-radius: inherit; background: var(--lime); transition: width .35s ease; }
 .streak-meter { justify-self: end; min-width: 58px; min-height: 40px; padding: 0 11px; display: flex; align-items: center; justify-content: center; gap: 5px; border-radius: 12px; color: #667087; background: rgba(255,255,255,.06); font-variant-numeric: tabular-nums; }
 .streak-meter.hot { color: #ffab4a; background: rgba(255,171,74,.1); }
+.alien-health-bar span { background: linear-gradient(90deg, var(--coral), var(--violet)); box-shadow: 0 0 13px rgba(141,117,255,.28); }
+.player-shield-meter { justify-self: end; min-width: 58px; min-height: 40px; padding: 0 11px; display: flex; align-items: center; justify-content: center; gap: 5px; border-radius: 12px; color: var(--sky); background: rgba(167,221,237,.09); font-variant-numeric: tabular-nums; transition-property: color, background-color, transform; transition-duration: 180ms; }
+.player-shield-meter.critical { color: #ff8a8a; background: rgba(255,98,98,.11); animation: shieldWarning 900ms ease-in-out infinite alternate; }
+.story-boss-title { min-width: 0; justify-self: center; text-align: center; }
+.story-boss-title span { display: flex; align-items: center; justify-content: center; gap: 5px; color: #7f8aa3; text-transform: uppercase; letter-spacing: .11em; font-size: 9px; font-weight: 900; }
+.story-boss-title strong { display: block; margin-top: 3px; overflow: hidden; color: white; font-family: 'Space Grotesk'; font-size: 17px; text-overflow: ellipsis; white-space: nowrap; }
+.boss-round { justify-self: end; min-width: 48px; height: 38px; display: grid; place-items: center; border-radius: 11px; color: var(--deep); background: var(--gold); box-shadow: 0 4px 0 #9d7600; font-family: 'Space Grotesk'; font-size: 11px; font-variant-numeric: tabular-nums; font-weight: 900; }
+.jrpg-battle-stage { position: relative; z-index: 2; width: min(960px, calc(100% - 40px)); margin: auto; padding: 12px env(safe-area-inset-right) max(34px, env(safe-area-inset-bottom)) env(safe-area-inset-left); }
+.jrpg-arena { position: relative; height: 310px; margin-bottom: 17px; }
+.jrpg-arena .battle-scene { height: 100%; aspect-ratio: auto; border-radius: 24px 24px 8px 8px; }
+.battle-hud { position: absolute; z-index: 10; left: 18px; right: 18px; top: 16px; display: flex; align-items: start; justify-content: space-between; gap: 20px; pointer-events: none; }
+.boss-vitals, .ship-vitals { padding: 10px 12px; border-radius: 13px; background: rgba(10,17,37,.86); box-shadow: 0 0 0 1px rgba(255,255,255,.09), 0 10px 24px rgba(0,0,0,.18); backdrop-filter: blur(8px); }
+.boss-vitals { min-width: 230px; }
+.boss-vitals > span, .ship-vitals > span { display: block; color: #8f9ab2; text-transform: uppercase; letter-spacing: .1em; font-size: 8px; font-weight: 900; }
+.boss-vitals > strong { display: block; margin: 3px 0 7px; color: white; font-family: 'Space Grotesk'; font-size: 13px; }
+.boss-shield-cells { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; }
+.boss-shield-cells i { width: 27px; height: 6px; border-radius: 3px; background: rgba(255,255,255,.1); box-shadow: inset 0 1px 1px rgba(0,0,0,.25); transition-property: background-color, box-shadow, transform; transition-duration: 220ms; }
+.boss-shield-cells i.active { background: var(--violet); box-shadow: 0 0 9px rgba(141,117,255,.55); }
+.boss-shield-cells i.breaking { animation: bossCellBreak 560ms 300ms cubic-bezier(.2,.8,.2,1) both; }
+.ship-vitals { text-align: right; }
+.ship-vitals > div { margin-top: 6px; display: flex; justify-content: end; gap: 4px; color: #49536b; }
+.ship-vitals svg { transition-property: color, filter, scale; transition-duration: 220ms; }
+.ship-vitals svg.active { color: var(--sky); filter: drop-shadow(0 0 6px rgba(167,221,237,.45)); }
+.ship-vitals svg.breaking { color: var(--sky); fill: currentColor; animation: playerShieldBreak 620ms 300ms cubic-bezier(.2,.8,.2,1) both; }
+.ship-vitals.critical svg.active { color: var(--coral); animation: shieldWarning 700ms 300ms ease-in-out infinite alternate; }
+.battle-intro-controls { min-height: 76px; margin-top: 23px; display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.battle-intro-controls > div { display: flex; flex-direction: column; gap: 4px; }
+.battle-intro-controls span { color: #7f8aa3; text-transform: uppercase; letter-spacing: .11em; font-size: 9px; font-weight: 900; }
+.battle-intro-controls strong { color: var(--sky); font-family: 'Space Grotesk'; font-size: 17px; }
+.jrpg-command-deck { margin-top: 19px; padding: 14px; display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); align-items: stretch; gap: 13px; border-radius: 24px; background: rgba(255,255,255,.055); box-shadow: 0 0 0 1px rgba(255,255,255,.07); }
+.jrpg-equation-panel { min-height: 164px; padding: 16px 19px; display: flex; flex-direction: column; justify-content: space-between; border-radius: 14px; color: var(--ink); background: var(--paper); box-shadow: 0 6px 0 #b9bdc5; }
+.jrpg-command-label { display: flex; justify-content: space-between; gap: 12px; color: #7c8494; text-transform: uppercase; letter-spacing: .09em; font-size: 8px; font-weight: 900; }
+.jrpg-command-label strong { display: flex; align-items: center; gap: 4px; color: #9b7400; font-size: inherit; font-variant-numeric: tabular-nums; }
+.jrpg-equation { display: flex; align-items: center; justify-content: center; gap: 10px; font-family: 'Space Grotesk'; font-size: clamp(40px, 5vw, 58px); line-height: 1; font-variant-numeric: tabular-nums; font-weight: 800; letter-spacing: -.06em; }
+.jrpg-equation i { color: #8c94a3; font-size: .55em; font-style: normal; }
+.jrpg-equation strong { min-width: .9em; display: grid; place-items: center; border-radius: 13px; color: var(--deep); background: var(--lime); box-shadow: 0 5px 0 #829600; transform: rotate(3deg); }
+.jrpg-equation.celebrate strong { animation: pop .38s ease; }
+.jrpg-answer-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 11px; }
+.jrpg-answer { min-height: 76px; border-radius: 14px; }
+.jrpg-answer:disabled:not(.correct-answer):not(.wrong-answer) { cursor: wait; opacity: .48; }
+.jrpg-hard-answer-form { min-width: 0; min-height: 164px; padding: 14px; display: flex; flex-direction: column; justify-content: center; gap: 11px; border-radius: 14px; background: rgba(141,117,255,.12); box-shadow: inset 0 0 0 1px rgba(141,117,255,.24); }
+.jrpg-hard-heading { display: flex; align-items: center; gap: 9px; }
+.jrpg-hard-heading > span { flex: 0 0 auto; width: 32px; height: 32px; display: grid; place-items: center; border-radius: 9px; color: white; background: var(--violet); box-shadow: 0 3px 0 #5940cf; }
+.jrpg-hard-heading small, .jrpg-hard-heading strong { display: block; }
+.jrpg-hard-heading small { margin-bottom: 2px; color: #9a8bef; text-transform: uppercase; letter-spacing: .1em; font-size: 7px; font-weight: 900; }
+.jrpg-hard-heading strong { color: white; font-family: 'Space Grotesk'; font-size: 12px; }
+.jrpg-hard-controls { min-width: 0; display: flex; align-items: stretch; gap: 10px; }
+.jrpg-hard-controls .hard-input-wrap { border-radius: 14px; box-shadow: 0 5px 0 #b9bdc5; }
+.jrpg-hard-controls .hard-input-wrap:focus-within { box-shadow: 0 7px 0 #b9bdc5, 0 0 0 4px rgba(141,117,255,.25); }
+.jrpg-hard-controls .hard-input-wrap.wrong { box-shadow: 0 5px 0 #ae3034; }
+.jrpg-hard-controls .hard-input-wrap.correct { box-shadow: 0 5px 0 #7d9000; }
+.jrpg-hard-controls .hard-input-wrap input { height: 66px; padding-inline: 20px 46px; font-size: 32px; }
+.jrpg-hard-controls .hard-input-wrap > span { right: 14px; }
+.jrpg-hard-controls > button { min-width: 108px; }
+.jrpg-hard-answer-form > p { color: #8f98ad; font-size: 9px; font-weight: 700; }
 .quiz-stage { position: relative; z-index: 2; width: min(760px, calc(100% - 40px)); min-height: calc(100svh - 84px - env(safe-area-inset-top)); min-height: calc(100dvh - 84px - env(safe-area-inset-top)); margin: auto; padding: clamp(30px, 5vh, 70px) env(safe-area-inset-right) max(60px, env(safe-area-inset-bottom)) env(safe-area-inset-left); display: flex; flex-direction: column; align-items: center; }
+.challenge-stage { width: min(820px, calc(100% - 40px)); padding-top: clamp(15px, 2.5vh, 28px); }
+.challenge-arena { width: min(620px, 100%); margin-bottom: 20px; }
+.battle-label { margin: 0 3px 9px; display: flex; align-items: center; justify-content: space-between; color: #7f89a1; text-transform: uppercase; letter-spacing: .1em; font-size: 9px; font-weight: 800; }
+.battle-label span { color: var(--coral); }
+.battle-label strong { font-size: inherit; font-variant-numeric: tabular-nums; }
 .quiz-status { width: 100%; display: flex; align-items: center; justify-content: space-between; }
 .question-tag { color: var(--lime); }
 .score-readout { display: flex; align-items: center; gap: 6px; color: #ffd765; font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
@@ -191,6 +294,9 @@ footer { min-height: 120px; padding: 30px max(clamp(20px, 7vw, 110px), env(safe-
 .equation strong { min-width: .9em; display: grid; place-items: center; color: var(--deep); background: var(--lime); border-radius: 22px; box-shadow: 0 7px 0 #7d9000; transform: rotate(3deg); }
 .equation.celebrate strong { animation: pop .38s ease; }
 .equation.hard-equation strong { color: white; background: var(--violet); box-shadow: 0 7px 0 #5940cf; }
+.equation.challenge-equation { margin: clamp(22px, 3.5vh, 38px) 0 7px; font-size: clamp(49px, 7.5vw, 76px); }
+.equation.challenge-equation strong { background: var(--coral); box-shadow: 0 6px 0 #ae3034; }
+.challenge-stage .answer-grid { max-width: 680px; }
 .quiz-prompt { margin-bottom: 25px; color: #858fa7; font-size: 14px; }
 .answer-grid { width: 100%; display: grid; grid-template-columns: repeat(2, 1fr); gap: 13px; }
 .answer-button { position: relative; min-height: 92px; cursor: pointer; color: var(--ink); background: white; border: 0; border-radius: 18px; box-shadow: 0 5px 0 #b9bdc5; transition-property: transform, box-shadow, background-color, color; transition-duration: 180ms; }
@@ -260,6 +366,15 @@ footer { min-height: 120px; padding: 30px max(clamp(20px, 7vw, 110px), env(safe-
 .result-stats small { font-size: 13px; color: #8e94a0; }
 .result-stats span { color: #888d98; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
 .result-actions { display: flex; justify-content: center; gap: 12px; }
+.challenge-result-card { width: min(690px, 100%); }
+.challenge-result-scene { position: relative; margin: calc(clamp(34px, 6vw, 60px) * -1) calc(clamp(34px, 6vw, 60px) * -1) 31px; }
+.challenge-result-scene .battle-scene { border-radius: 32px 32px 0 0; }
+.challenge-result-card .result-kicker { color: #735be1; }
+.challenge-reward { width: max-content; max-width: 100%; margin: 24px auto 0; padding: 9px 16px 9px 9px; display: flex; align-items: center; gap: 11px; border-radius: 17px; background: #fff1b8; box-shadow: 0 5px 0 #d4a928; text-align: left; }
+.challenge-reward > span { width: 42px; height: 42px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 12px; color: var(--deep); background: var(--gold); }
+.challenge-reward div { min-width: 0; display: flex; flex-direction: column; }
+.challenge-reward small { color: #937008; text-transform: uppercase; letter-spacing: .1em; font-size: 9px; font-weight: 900; }
+.challenge-reward strong { font-family: 'Space Grotesk'; font-size: 16px; }
 
 @keyframes rise { from { opacity: 0; transform: translateY(22px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes orbitSpin { to { transform: rotate(360deg); } }
@@ -271,10 +386,23 @@ footer { min-height: 120px; padding: 30px max(clamp(20px, 7vw, 110px), env(safe-
 @keyframes coachIn { from { opacity: 0; transform: translateY(18px) scale(.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
 @keyframes coachExampleIn { from { opacity: 0; transform: translateX(10px); } to { opacity: 1; transform: translateX(0); } }
 @keyframes coachStepIn { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes shieldWarning { from { transform: scale(1); } to { transform: scale(1.055); } }
+@keyframes bossCellBreak {
+	0%, 42% { background: var(--violet); box-shadow: 0 0 9px rgba(141,117,255,.55); transform: scale(1); }
+	58% { background: white; box-shadow: 0 0 17px 5px rgba(255,255,255,.72); transform: scale(1.32,1.75); }
+	100% { background: rgba(255,255,255,.1); box-shadow: inset 0 1px 1px rgba(0,0,0,.25); transform: scale(1); }
+}
+@keyframes playerShieldBreak {
+	0%, 42% { opacity: 1; scale: 1; filter: drop-shadow(0 0 6px rgba(167,221,237,.45)); }
+	58% { opacity: 1; scale: 1.32; filter: drop-shadow(0 0 13px white); }
+	100% { opacity: 0; scale: .55; filter: drop-shadow(0 0 0 transparent); }
+}
 
 @media (max-width: 900px) {
 	.hero { grid-template-columns: 1fr 1fr; padding-left: max(40px, env(safe-area-inset-left)); padding-right: max(40px, env(safe-area-inset-right)); }
 	.orbit-scene { width: 48vw; }
+	.play-mode-hub { grid-template-columns: 1fr; align-items: start; }
+	.play-mode-heading { max-width: 650px; }
 	.table-grid { grid-template-columns: repeat(3, 1fr); }
 	.preset-row { flex-wrap: wrap; }
 	.mode-switch { grid-template-columns: 1fr; }
@@ -283,6 +411,9 @@ footer { min-height: 120px; padding: 30px max(clamp(20px, 7vw, 110px), env(safe-
 	.launch-selection { padding: 20px 0 0; display: flex; align-items: end; justify-content: space-between; border-left: 0; border-top: 1px solid rgba(255,255,255,.1); }
 	.launch-selection > div { margin: 0; }
 	.launch-selection button { width: auto; }
+	.challenge-panel { grid-template-columns: 1fr; }
+	.challenge-copy { max-width: 620px; }
+	.challenge-preview { width: min(650px, 100%); }
 	.badges-section { grid-template-columns: 1fr; }
 	.badge-intro { max-width: 600px; }
 }
@@ -297,6 +428,11 @@ footer { min-height: 120px; padding: 30px max(clamp(20px, 7vw, 110px), env(safe-
 	.hero-copy > p { margin: 20px 0 25px; max-width: 340px; font-size: 17px; }
 	.orbit-scene { position: absolute; width: 74vw; right: -29vw; bottom: -13vw; opacity: .3; }
 	.orbit-problem, .orbit-rocket { display: none; }
+	.play-mode-hub { padding: 72px max(16px, env(safe-area-inset-right)) 48px max(16px, env(safe-area-inset-left)); gap: 28px; }
+	.play-mode-heading h2 { font-size: 42px; }
+	.play-mode-heading p { font-size: 14px; }
+	.play-mode-tabs { grid-template-columns: 1fr; padding: 8px; border-radius: 22px; }
+	.play-mode-tabs button { min-height: 88px; padding-left: 70px; border-radius: 15px; }
 	.mission-section { padding: 75px max(16px, env(safe-area-inset-right)) 85px max(16px, env(safe-area-inset-left)); }
 	.section-heading { align-items: start; flex-direction: column; gap: 14px; margin-bottom: 28px; }
 	.section-heading h2, .badge-intro h2 { font-size: 42px; }
@@ -311,6 +447,16 @@ footer { min-height: 120px; padding: 30px max(clamp(20px, 7vw, 110px), env(safe-
 	.launch-selection { align-items: center; }
 	.launch-selection strong { font-size: 31px; }
 	.launch-selection button { min-height: 46px; padding-inline: 16px; }
+	.challenge-panel { margin-bottom: 55px; padding: 25px 18px 18px; gap: 27px; border-radius: 23px; }
+	.challenge-copy h3 { font-size: 39px; }
+	.challenge-copy > p { font-size: 14px; }
+	.challenge-rules { align-items: start; flex-direction: column; gap: 9px; }
+	.challenge-actions { align-items: start; flex-direction: column; }
+	.challenge-actions button { width: 100%; }
+	.challenge-preview { padding: 6px; border-radius: 27px; }
+	.preview-label { left: 19px; right: 19px; top: 17px; }
+	.preview-shields { left: 19px; right: 19px; bottom: 17px; }
+	.preview-shields i { width: 13px; }
 	.solo-heading { align-items: start; flex-direction: column; gap: 6px; }
 	.table-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
 	.table-tile { min-height: 160px; padding: 16px; border-radius: 18px; }
@@ -320,8 +466,36 @@ footer { min-height: 120px; padding: 30px max(clamp(20px, 7vw, 110px), env(safe-
 	.badge-medallion { width: 75px; }
 	footer { padding: 30px max(20px, env(safe-area-inset-right)) max(30px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left)); flex-direction: column; align-items: start; }
 	.game-header { width: auto; min-height: calc(84px + env(safe-area-inset-top)); margin-inline: max(12px, env(safe-area-inset-left)) max(12px, env(safe-area-inset-right)); padding-top: env(safe-area-inset-top); grid-template-columns: 42px 1fr 55px; gap: 9px; }
+	.story-boss-title strong { font-size: 14px; }
+	.boss-round { min-width: 44px; height: 36px; }
+	.jrpg-battle-stage { width: auto; margin-inline: max(11px, env(safe-area-inset-left)) max(11px, env(safe-area-inset-right)); padding-top: 5px; }
+	.jrpg-arena { height: 205px; margin-bottom: 16px; }
+	.jrpg-arena .battle-scene { border-radius: 18px 18px 7px 7px; }
+	.battle-hud { left: 8px; right: 8px; top: 8px; gap: 8px; }
+	.boss-vitals, .ship-vitals { padding: 7px 8px; border-radius: 10px; }
+	.boss-vitals { min-width: 172px; }
+	.boss-vitals > strong { margin-bottom: 5px; font-size: 10px; }
+	.boss-shield-cells { gap: 3px; }
+	.boss-shield-cells i { width: 20px; height: 5px; }
+	.ship-vitals > span { font-size: 7px; }
+	.ship-vitals > div { gap: 2px; }
+	.battle-intro-controls { min-height: 68px; margin-top: 18px; }
+	.battle-intro-controls strong { font-size: 14px; }
+	.battle-intro-controls button { min-height: 44px; padding-inline: 15px; }
+	.jrpg-command-deck { margin-top: 15px; padding: 8px; grid-template-columns: 1fr; gap: 10px; border-radius: 19px; }
+	.jrpg-equation-panel { min-height: 112px; padding: 12px 14px; border-radius: 11px; }
+	.jrpg-equation { font-size: 43px; }
+	.jrpg-answer-grid { gap: 8px; }
+	.jrpg-answer { min-height: 68px; border-radius: 13px; }
+	.jrpg-hard-answer-form { min-height: 146px; padding: 12px; }
+	.jrpg-hard-controls .hard-input-wrap input { height: 62px; font-size: 30px; }
+	.jrpg-hard-controls > button { min-width: 98px; padding-inline: 14px; }
 	.quiz-stage { width: auto; min-height: calc(100svh - 84px - env(safe-area-inset-top)); min-height: calc(100dvh - 84px - env(safe-area-inset-top)); margin-inline: max(14px, env(safe-area-inset-left)) max(14px, env(safe-area-inset-right)); padding-top: 40px; padding-bottom: max(60px, env(safe-area-inset-bottom)); }
+	.challenge-stage { padding-top: 18px; }
+	.challenge-arena { margin-bottom: 18px; }
+	.challenge-health .game-label span:first-child { max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.equation { margin: 60px 0 14px; font-size: clamp(54px, 18vw, 78px); gap: 10px; }
+	.equation.challenge-equation { margin: 27px 0 10px; font-size: clamp(44px, 14vw, 62px); }
 	.equation strong { border-radius: 16px; }
 	.answer-grid { gap: 10px; }
 	.answer-button { min-height: 83px; border-radius: 16px; }
@@ -347,8 +521,36 @@ footer { min-height: 120px; padding: 30px max(clamp(20px, 7vw, 110px), env(safe-
 	.coach-actions { flex-direction: column; }
 	.coach-actions button { width: 100%; }
 	.result-card { padding: 36px 20px; border-radius: 25px; }
+	.challenge-result-card { padding-top: 28px; }
+	.challenge-result-scene { margin: -28px -20px 27px; }
 	.result-actions { flex-direction: column; }
 	.result-actions button { width: 100%; }
+}
+
+@media (min-width: 651px) {
+	.challenge-result-card .challenge-result-scene .battle-scene { aspect-ratio: 2.6 / 1; }
+}
+
+@media (min-width: 651px) and (max-height: 900px) {
+	.jrpg-battle-stage { padding-top: 2px; }
+	.jrpg-arena { height: 245px; margin-bottom: 14px; }
+	.jrpg-battle-stage .battle-dialogue { min-height: 92px; padding-top: 24px; padding-bottom: 14px; }
+	.jrpg-command-deck { margin-top: 14px; padding: 10px; }
+	.jrpg-equation-panel { min-height: 132px; padding-block: 12px; }
+	.jrpg-answer { min-height: 60px; }
+	.challenge-stage { padding-top: 8px; padding-bottom: 18px; }
+	.challenge-arena { width: min(440px, 100%); margin-bottom: 10px; }
+	.equation.challenge-equation { margin: 14px 0 4px; font-size: clamp(48px, 6vw, 58px); }
+	.challenge-stage .quiz-prompt { margin-bottom: 12px; }
+	.challenge-stage .answer-grid { max-width: 620px; gap: 10px; }
+	.challenge-stage .answer-button { min-height: 74px; }
+	.challenge-stage .feedback-line { margin-top: 14px; }
+	.challenge-result-card { padding-top: 30px; padding-bottom: 30px; }
+	.challenge-result-scene { margin-top: -30px; margin-bottom: 22px; }
+	.challenge-result-card .challenge-result-scene .battle-scene { aspect-ratio: 3.15 / 1; }
+	.challenge-result-card h1 { font-size: 48px; }
+	.challenge-result-card > p { margin-top: 10px; font-size: 15px; }
+	.challenge-result-card .result-stats { margin-block: 22px 25px; padding-block: 18px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

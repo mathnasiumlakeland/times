@@ -113,15 +113,24 @@ function parseMidi(data: ArrayBuffer) {
 		}
 	}
 	seconds += ((finalTick - lastTick) * tempo) / ticksPerBeat / 1_000_000;
+	notes.sort((a, b) => a.start - b.start || a.note - b.note);
 	return { notes, duration: Math.max(seconds, 1) };
 }
 
 export class MidiPlayer {
 	private context?: AudioContext;
+	private output?: GainNode;
+	private compressor?: DynamicsCompressorNode;
 	private music?: ReturnType<typeof parseMidi>;
 	private timer?: number;
 	private sources = new Set<AudioScheduledSourceNode>();
+	private drumNoiseBuffer?: AudioBuffer;
 	private iosMediaBridge?: HTMLAudioElement;
+	private playbackStartedAt = 0;
+	private loopNumber = 0;
+	private nextNoteIndex = 0;
+
+	constructor(private readonly volume = 1) {}
 
 	async load(url: string) {
 		const response = await fetch(url);
@@ -129,34 +138,94 @@ export class MidiPlayer {
 		this.music = parseMidi(await response.arrayBuffer());
 	}
 
+	async unlock() {
+		this.requestPlaybackAudioSession();
+		const context = this.ensureAudioGraph();
+		await context.resume();
+		this.startIosMediaBridge();
+	}
+
 	async play() {
 		if (!this.music) throw new Error('Music has not loaded yet.');
-		this.requestPlaybackAudioSession();
-		this.startIosMediaBridge();
-		this.context ??= new AudioContext();
-		await this.context.resume();
 		this.stop();
+		await this.unlock();
 		this.scheduleLoop();
 	}
 
 	stop() {
-		if (this.timer !== undefined) window.clearTimeout(this.timer);
+		if (this.timer !== undefined) window.clearInterval(this.timer);
 		this.timer = undefined;
-		for (const source of this.sources) source.stop();
+		for (const source of this.sources) {
+			try {
+				source.stop();
+			} catch {
+				// A source can finish between the set iteration and the stop call.
+			}
+		}
 		this.sources.clear();
 		this.iosMediaBridge?.pause();
+		this.playbackStartedAt = 0;
+		this.loopNumber = 0;
+		this.nextNoteIndex = 0;
 	}
 
 	destroy() {
 		this.stop();
 		void this.context?.close();
+		this.context = undefined;
+		this.output = undefined;
+		this.compressor = undefined;
+		this.drumNoiseBuffer = undefined;
+	}
+
+	private ensureAudioGraph() {
+		if (this.context) return this.context;
+		this.context = new AudioContext();
+		this.output = this.context.createGain();
+		this.compressor = this.context.createDynamicsCompressor();
+		this.output.gain.value = this.volume;
+		this.compressor.threshold.value = -18;
+		this.compressor.knee.value = 16;
+		this.compressor.ratio.value = 4;
+		this.compressor.attack.value = 0.004;
+		this.compressor.release.value = 0.16;
+		this.output.connect(this.compressor);
+		this.compressor.connect(this.context.destination);
+		return this.context;
 	}
 
 	private scheduleLoop() {
 		if (!this.context || !this.music) return;
-		const startAt = this.context.currentTime + 0.05;
-		for (const note of this.music.notes) this.playNote(note, startAt + note.start);
-		this.timer = window.setTimeout(() => this.scheduleLoop(), this.music.duration * 1000);
+		this.playbackStartedAt = this.context.currentTime + 0.06;
+		this.loopNumber = 0;
+		this.nextNoteIndex = 0;
+		this.scheduleUpcomingNotes();
+		this.timer = window.setInterval(() => this.scheduleUpcomingNotes(), 100);
+	}
+
+	private scheduleUpcomingNotes() {
+		if (!this.context || !this.music || this.music.notes.length === 0) return;
+		const now = this.context.currentTime;
+		const scheduleThrough = now + 1.5;
+		const currentLoop = Math.floor(Math.max(0, now - this.playbackStartedAt) / this.music.duration);
+		if (currentLoop > this.loopNumber) {
+			this.loopNumber = currentLoop;
+			this.nextNoteIndex = 0;
+		}
+
+		while (true) {
+			if (this.nextNoteIndex >= this.music.notes.length) {
+				this.loopNumber += 1;
+				this.nextNoteIndex = 0;
+			}
+
+			const note = this.music.notes[this.nextNoteIndex];
+			const startsAt = this.playbackStartedAt + this.loopNumber * this.music.duration + note.start;
+			if (startsAt > scheduleThrough) return;
+			this.nextNoteIndex += 1;
+			if (startsAt < now - 0.04) continue;
+			this.playNote(note, Math.max(startsAt, now + 0.005));
+		}
 	}
 
 	private playNote(note: MidiNote, startAt: number) {
@@ -165,14 +234,11 @@ export class MidiPlayer {
 		gain.gain.setValueAtTime(0.0001, startAt);
 		gain.gain.exponentialRampToValueAtTime(Math.max(0.012, (note.velocity / 127) * 0.055), startAt + 0.012);
 		gain.gain.exponentialRampToValueAtTime(0.0001, startAt + note.duration);
-		gain.connect(this.context.destination);
+		gain.connect(this.output ?? this.context.destination);
 
 		if (note.channel === 9) {
-			const buffer = this.context.createBuffer(1, Math.max(1, Math.ceil(this.context.sampleRate * Math.min(note.duration, 0.13))), this.context.sampleRate);
-			const samples = buffer.getChannelData(0);
-			for (let index = 0; index < samples.length; index++) samples[index] = Math.random() * 2 - 1;
 			const noise = this.context.createBufferSource();
-			noise.buffer = buffer;
+			noise.buffer = this.getDrumNoiseBuffer();
 			noise.connect(gain);
 			this.trackSource(noise);
 			noise.start(startAt);
@@ -187,6 +253,16 @@ export class MidiPlayer {
 		this.trackSource(oscillator);
 		oscillator.start(startAt);
 		oscillator.stop(startAt + note.duration + 0.02);
+	}
+
+	private getDrumNoiseBuffer() {
+		if (!this.context) throw new Error('Audio context is not ready.');
+		if (this.drumNoiseBuffer) return this.drumNoiseBuffer;
+		const buffer = this.context.createBuffer(1, Math.ceil(this.context.sampleRate * 0.13), this.context.sampleRate);
+		const samples = buffer.getChannelData(0);
+		for (let index = 0; index < samples.length; index++) samples[index] = Math.random() * 2 - 1;
+		this.drumNoiseBuffer = buffer;
+		return buffer;
 	}
 
 	private trackSource(source: AudioScheduledSourceNode) {

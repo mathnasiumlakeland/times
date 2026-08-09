@@ -4,8 +4,10 @@
 	import {
 		ArrowLeft,
 		ArrowRight,
+		BookOpen,
 		Check,
 		Flame,
+		Gamepad2,
 		Home,
 		Keyboard,
 		Lightbulb,
@@ -14,9 +16,11 @@
 		Music,
 		MousePointer2,
 		Crown,
+		Map as MapIcon,
 		Rocket,
 		RotateCcw,
 		RefreshCw,
+		Shield,
 		Sparkles,
 		Star,
 		Target,
@@ -25,24 +29,42 @@
 		VolumeX,
 		X
 	} from 'lucide-svelte';
+	import AlienBattleScene from '$lib/components/game/AlienBattleScene.svelte';
+	import BattleDialogue from '$lib/components/game/BattleDialogue.svelte';
+	import StoryMap from '$lib/components/game/StoryMap.svelte';
 	import Button from '$lib/components/ui/button/Button.svelte';
+	import { BattleAudio } from '$lib/battle-audio';
+	import {
+		ALIEN_MAX_HEALTH,
+		PLAYER_MAX_SHIELDS,
+		makeChallengeTableSequence,
+		resolveChallengeAttempt,
+		type BattleAction,
+		type ChallengeOutcome
+	} from '$lib/challenge';
 	import { destroyHaptics, initializeHaptics, triggerHaptic } from '$lib/haptics';
+	import { makeEmptyGameProgress, normalizeGameProgress, type GameProgress } from '$lib/game-progress';
 	import { MidiPlayer } from '$lib/midi-player';
 	import { makePracticeExample, type PracticeExample } from '$lib/practice-strategies';
+	import {
+		STORY_NODES,
+		getStoryProgress,
+		recordStoryResult,
+		type StoryBossNode,
+		type StoryNode,
+		type StoryTravel
+	} from '$lib/story';
 
-	type GameMode = 'home' | 'quiz' | 'result';
+	type GameMode = 'home' | 'quiz' | 'result' | 'challenge' | 'challenge-result';
+	type HomeView = 'story' | 'free-play';
+	type SessionOrigin = 'story' | 'free-play';
+	type ChallengePhase = 'intro' | 'battle';
 	type Difficulty = 'easy' | 'hard';
 	type Question = { table: number; multiplier: number };
 	type SoundName = 'correct' | 'incorrect' | 'complete' | 'click' | 'click-release';
-	type Progress = {
-		completed: number[];
-		hardCompleted: number[];
-		bestScores: Record<number, number>;
-		hardBestScores: Record<number, number>;
-		totalStars: number;
-	};
-
+	type MusicKind = 'regular' | 'boss';
 	const totalQuestions = 10;
+	const progressStorageKey = 'multiply-mission-progress';
 	const tables = Array.from({ length: 12 }, (_, index) => index + 1);
 	const soundUrls: Record<SoundName, string> = {
 		correct: '/audio/duolingo-correct.mp3',
@@ -56,7 +78,8 @@
 		'click-release': 0.13125
 	};
 	const sounds: Partial<Record<SoundName, HTMLAudioElement>> = {};
-	const backgroundMusicUrl = '/audio/kk-slider-aircheck.mid';
+	const regularMusicUrl = '/audio/kk-slider-aircheck.mid';
+	const bossBattleMusicUrl = '/audio/story-boss-battle-theme.mid';
 	const badgeNames = [
 		'First Orbit',
 		'Double Trouble',
@@ -73,7 +96,10 @@
 	];
 
 	let mode = $state<GameMode>('home');
+	let homeView = $state<HomeView>('story');
+	let sessionOrigin = $state<SessionOrigin>('free-play');
 	let selectedDifficulty = $state<Difficulty>('easy');
+	let storyDifficulty = $state<Difficulty>('easy');
 	let sessionDifficulty = $state<Difficulty>('easy');
 	let activeTable = $state(1);
 	let selectedTables = $state<number[]>([8]);
@@ -92,10 +118,54 @@
 	let coachOpen = $state(false);
 	let coachExample = $state<PracticeExample | null>(null);
 	let orbitProblems = $state<[string, string]>(['7 × 8', '12 × 4']);
-	let progress = $state<Progress>({ completed: [], hardCompleted: [], bestScores: {}, hardBestScores: {}, totalStars: 0 });
+	let progress = $state<GameProgress>(makeEmptyGameProgress());
+	let activeStoryNodeId = $state<string | null>(null);
+	let storyTravel = $state<StoryTravel | null>(null);
+	let storyTravelId = 0;
+	let alienHealth = $state(ALIEN_MAX_HEALTH);
+	let playerShields = $state(PLAYER_MAX_SHIELDS);
+	let challengeAction = $state<BattleAction>('idle');
+	let challengeActionId = $state(0);
+	let challengeOutcome = $state<ChallengeOutcome>(null);
+	let challengeEnding = $state(false);
+	let challengeAnimating = $state(false);
+	let challengePhase = $state<ChallengePhase>('intro');
+	let battleDialogue = $state({ id: 0, speaker: 'MISSION CONTROL', text: '' });
+	let battleDialogueComplete = $state(false);
 	let rocketBoostFrame: number | undefined;
-	let musicPlayer: MidiPlayer | undefined;
+	let feedbackTimer: number | undefined;
+	let combatTimer: number | undefined;
+	let regularMusicPlayer: MidiPlayer | undefined;
+	let bossMusicPlayer: MidiPlayer | undefined;
+	let battleAudio: BattleAudio | undefined;
+	let currentMusicKind: MusicKind = 'regular';
+	let musicReady: Record<MusicKind, boolean> = { regular: false, boss: false };
+	let musicPlaybackId = 0;
+	let musicMutedByUser = false;
+	let pendingMusicMode: GameMode | null = null;
 	let musicStatus = $state<'off' | 'loading' | 'playing' | 'unavailable'>('loading');
+
+	function loadSavedProgress() {
+		try {
+			const saved = localStorage.getItem(progressStorageKey);
+			return saved ? normalizeGameProgress(JSON.parse(saved)) : null;
+		} catch {
+			try {
+				localStorage.removeItem(progressStorageKey);
+			} catch {
+				// Storage can be unavailable in restricted browsing modes; play can continue in memory.
+			}
+			return null;
+		}
+	}
+
+	function saveProgress() {
+		try {
+			localStorage.setItem(progressStorageKey, JSON.stringify(progress));
+		} catch {
+			// Completing a mission should never depend on storage permission or available quota.
+		}
+	}
 
 	let currentQuestion = $derived(questions[questionIndex] ?? { table: activeTable, multiplier: 1 });
 	let correctAnswer = $derived(currentQuestion.table * currentQuestion.multiplier);
@@ -104,32 +174,63 @@
 	let earnedStars = $derived(score >= 9 ? 3 : score >= 7 ? 2 : score >= 5 ? 1 : 0);
 	let accuracy = $derived(Math.round((score / totalQuestions) * 100));
 	let isSingleTable = $derived(sessionTables.length === 1);
-	let sessionLabel = $derived(`${sessionDifficulty === 'hard' ? 'Hard' : 'Easy'} · ${isSingleTable ? `×${sessionTables[0]} mission` : `${sessionTables.length} tables mixed`}`);
-	let resultTitle = $derived(
-		earnedStars === 0
+	let sessionLabel = $derived(sessionOrigin === 'story'
+		? `Story ${sessionDifficulty === 'hard' ? 'Hard' : 'Easy'} · ×${sessionTables[0]} planet`
+		: `${sessionDifficulty === 'hard' ? 'Hard' : 'Easy'} · ${isSingleTable ? `×${sessionTables[0]} mission` : `${sessionTables.length} tables mixed`}`
+	);
+	let resultTitle = $derived.by(() => {
+		if (sessionOrigin === 'story') return earnedStars === 0 ? 'Refuel and retry!' : 'Planet cleared!';
+		return earnedStars === 0
 			? 'One more orbit!'
 			: isSingleTable
 				? sessionDifficulty === 'hard'
 					? `Master ${badgeNames[sessionTables[0] - 1]}`
 					: badgeNames[sessionTables[0] - 1]
-				: sessionDifficulty === 'hard' ? 'Hard mix mastered' : 'Mixed mission mastered'
-	);
+				: sessionDifficulty === 'hard' ? 'Hard mix mastered' : 'Mixed mission mastered';
+	});
 	let resultDescription = $derived.by(() => {
+		if (sessionOrigin === 'story') {
+			return earnedStars === 0
+				? `Score 5 or more in ${sessionDifficulty} mode to chart a safe route beyond the ×${sessionTables[0]} planet.`
+				: `The ×${sessionTables[0]} planet is secure in ${sessionDifficulty} mode. Your next destination is now on the map.`;
+		}
 		if (!isSingleTable) return `You practiced ${sessionTables.map((table) => `×${table}`).join(', ')} in ${sessionDifficulty} mode.`;
 		if (earnedStars === 0) return `Score 5 or more to unlock the ${sessionDifficulty === 'hard' ? 'Master' : 'Easy'} ×${sessionTables[0]} badge.`;
 		return sessionDifficulty === 'hard'
 			? `You earned the Master ×${sessionTables[0]} badge by typing every answer.`
 			: `You conquered the ${sessionTables[0]} times table in Easy mode.`;
 	});
+	let storyRoute = $derived(getStoryProgress(progress.story));
+	let activeStoryNode = $derived(STORY_NODES.find((node) => node.id === activeStoryNodeId));
+	let activeStoryBoss = $derived(activeStoryNode?.kind === 'boss' ? activeStoryNode : undefined);
+	let bossName = $derived(activeStoryBoss?.bossName ?? 'Alien guardian');
+	let alienHits = $derived(ALIEN_MAX_HEALTH - alienHealth);
+	let challengeResultTitle = $derived(challengeOutcome === 'victory' ? `${bossName} defeated!` : `${bossName} held the gate!`);
+	let challengeResultDescription = $derived(
+		challengeOutcome === 'victory'
+			? `You broke all ${ALIEN_MAX_HEALTH} shield cells. The route to the next sector is open.`
+			: `You landed ${alienHits} ${alienHits === 1 ? 'hit' : 'hits'} before your shields ran out. Repair, reload, and try again.`
+	);
 
 	onMount(() => {
 		initializeHaptics();
 		orbitProblems = makeOrbitProblems();
-		musicPlayer = new MidiPlayer();
-		void musicPlayer.load(backgroundMusicUrl).then(
-			() => musicStatus = 'off',
-			() => musicStatus = 'unavailable'
-		);
+		regularMusicPlayer = new MidiPlayer(0.78);
+		bossMusicPlayer = new MidiPlayer(0.94);
+		battleAudio = new BattleAudio();
+		void Promise.allSettled([
+			regularMusicPlayer.load(regularMusicUrl),
+			bossMusicPlayer.load(bossBattleMusicUrl)
+		]).then(([regularResult, bossResult]) => {
+			musicReady = {
+				regular: regularResult.status === 'fulfilled',
+				boss: bossResult.status === 'fulfilled'
+			};
+			musicStatus = musicReady.regular || musicReady.boss ? 'off' : 'unavailable';
+			const requestedMode = pendingMusicMode;
+			pendingMusicMode = null;
+			if (requestedMode && !musicMutedByUser) void playMusicForMode(requestedMode);
+		});
 
 		for (const [name, url] of Object.entries(soundUrls) as [SoundName, string][]) {
 			const audio = new Audio(url);
@@ -138,24 +239,16 @@
 			sounds[name] = audio;
 		}
 
-		const saved = localStorage.getItem('multiply-mission-progress');
-		if (saved) {
-			try {
-				const stored = JSON.parse(saved) as Partial<Progress>;
-				progress = {
-					completed: stored.completed ?? [],
-					hardCompleted: stored.hardCompleted ?? [],
-					bestScores: stored.bestScores ?? {},
-					hardBestScores: stored.hardBestScores ?? {},
-					totalStars: stored.totalStars ?? 0
-				};
-			} catch {
-				localStorage.removeItem('multiply-mission-progress');
-			}
-		}
+		const savedProgress = loadSavedProgress();
+		if (savedProgress) progress = savedProgress;
 
 		return () => {
-			musicPlayer?.destroy();
+			if (feedbackTimer !== undefined) window.clearTimeout(feedbackTimer);
+			if (combatTimer !== undefined) window.clearTimeout(combatTimer);
+			musicPlaybackId += 1;
+			regularMusicPlayer?.destroy();
+			bossMusicPlayer?.destroy();
+			battleAudio?.destroy();
 			destroyHaptics();
 		};
 	});
@@ -169,20 +262,92 @@
 		});
 	}
 
+	function playDialogueTick(character: string, index: number) {
+		battleAudio?.playDialogueTick(character, index);
+	}
+
+	function setBattleDialogue(speaker: string, text: string) {
+		battleDialogue = { id: battleDialogue.id + 1, speaker, text };
+		battleDialogueComplete = false;
+	}
+
+	function completeBattleDialogue() {
+		battleDialogueComplete = true;
+		if (coachOpen) return;
+		if (challengePhase === 'intro') {
+			void tick().then(() => document.querySelector<HTMLButtonElement>('.begin-battle')?.focus());
+			return;
+		}
+		focusChallengeCommand();
+	}
+
+	function musicKindForMode(targetMode: GameMode): MusicKind {
+		return targetMode === 'challenge' || targetMode === 'challenge-result' ? 'boss' : 'regular';
+	}
+
+	function availableMusicKindForMode(targetMode: GameMode): MusicKind {
+		const requested = musicKindForMode(targetMode);
+		if (musicReady[requested]) return requested;
+		return requested === 'boss' ? 'regular' : 'boss';
+	}
+
+	function stopMusic() {
+		regularMusicPlayer?.stop();
+		bossMusicPlayer?.stop();
+	}
+
+	async function playMusicForMode(targetMode: GameMode) {
+		if (musicStatus === 'loading') {
+			pendingMusicMode = targetMode;
+			return;
+		}
+		const nextMusicKind = availableMusicKindForMode(targetMode);
+		const player = nextMusicKind === 'boss' ? bossMusicPlayer : regularMusicPlayer;
+		if (!player || !musicReady[nextMusicKind]) {
+			musicStatus = 'unavailable';
+			return;
+		}
+
+		const playbackId = ++musicPlaybackId;
+		pendingMusicMode = null;
+		currentMusicKind = nextMusicKind;
+		// Treat a user-approved AudioContext resume as active so a mode change can supersede it.
+		musicStatus = 'playing';
+		stopMusic();
+		try {
+			await player.play();
+			if (playbackId !== musicPlaybackId) {
+				player.stop();
+				return;
+			}
+			musicStatus = 'playing';
+		} catch {
+			if (playbackId === musicPlaybackId) musicStatus = 'unavailable';
+		}
+	}
+
+	function switchMusicForMode(targetMode: GameMode) {
+		if (musicStatus === 'loading') {
+			if (pendingMusicMode) pendingMusicMode = targetMode;
+			return;
+		}
+		if (musicStatus !== 'playing' || currentMusicKind === availableMusicKindForMode(targetMode)) return;
+		void playMusicForMode(targetMode);
+	}
+
 	async function toggleBackgroundMusic() {
-		if (!musicPlayer || musicStatus === 'loading' || musicStatus === 'unavailable') return;
+		if (!regularMusicPlayer || !bossMusicPlayer || musicStatus === 'loading' || musicStatus === 'unavailable') return;
 		if (musicStatus === 'playing') {
-			musicPlayer.stop();
+			musicMutedByUser = true;
+			pendingMusicMode = null;
+			musicPlaybackId += 1;
+			stopMusic();
 			musicStatus = 'off';
 			return;
 		}
 
-		try {
-			await musicPlayer.play();
-			musicStatus = 'playing';
-		} catch {
-			musicStatus = 'unavailable';
-		}
+		musicMutedByUser = false;
+		await playMusicForMode(mode);
 	}
 
 	function shuffled<T>(items: T[]) {
@@ -267,22 +432,15 @@
 		return shuffled([...options]);
 	}
 
-	function startQuiz(table: number) {
-		startCustomQuiz([table], selectedDifficulty);
+	function scheduleFeedbackTransition(callback: () => void, delay = 700) {
+		if (feedbackTimer !== undefined) window.clearTimeout(feedbackTimer);
+		feedbackTimer = window.setTimeout(() => {
+			feedbackTimer = undefined;
+			callback();
+		}, delay);
 	}
 
-	function startCustomQuiz(selection = selectedTables, difficulty = selectedDifficulty) {
-		if (selection.length === 0) return;
-		const chosen = [...selection].sort((a, b) => a - b);
-		const tablePool: number[] = [];
-		while (tablePool.length < totalQuestions) tablePool.push(...shuffled(chosen));
-		sessionTables = chosen;
-		sessionDifficulty = difficulty;
-		activeTable = chosen[0];
-		questions = tablePool.slice(0, totalQuestions).map((table) => ({
-			table,
-			multiplier: Math.floor(Math.random() * 12) + 1
-		}));
+	function resetAnswerState() {
 		questionIndex = 0;
 		score = 0;
 		streak = 0;
@@ -294,9 +452,122 @@
 		wrongAttemptCount = 0;
 		coachOpen = false;
 		coachExample = null;
+		if (feedbackTimer !== undefined) window.clearTimeout(feedbackTimer);
+		feedbackTimer = undefined;
+	}
+
+	function startQuiz(table: number) {
+		startCustomQuiz([table], selectedDifficulty);
+	}
+
+	function startCustomQuiz(selection = selectedTables, difficulty = selectedDifficulty) {
+		if (selection.length === 0) return;
+		const chosen = [...selection].sort((a, b) => a - b);
+		const tablePool: number[] = [];
+		while (tablePool.length < totalQuestions) tablePool.push(...shuffled(chosen));
+		sessionTables = chosen;
+		sessionOrigin = 'free-play';
+		activeStoryNodeId = null;
+		sessionDifficulty = difficulty;
+		activeTable = chosen[0];
+		questions = tablePool.slice(0, totalQuestions).map((table) => ({
+			table,
+			multiplier: Math.floor(Math.random() * 12) + 1
+		}));
+		resetAnswerState();
+		challengeOutcome = null;
+		challengeEnding = false;
+		challengeAction = 'idle';
+		switchMusicForMode('quiz');
 		mode = 'quiz';
 		window.scrollTo({ top: 0, behavior: 'smooth' });
-		focusHardInput();
+		focusQuizQuestion();
+	}
+
+	function startStoryNode(node: StoryNode) {
+		const nodeIndex = STORY_NODES.findIndex((storyNode) => storyNode.id === node.id);
+		if (nodeIndex > progress.story.completedNodeIds.length) return;
+		storyTravel = null;
+		activeStoryNodeId = node.id;
+		if (node.kind === 'boss') {
+			startChallenge(node);
+			return;
+		}
+
+		const tablePool = Array.from({ length: totalQuestions }, () => node.table);
+		sessionOrigin = 'story';
+		sessionTables = [node.table];
+		sessionDifficulty = storyDifficulty;
+		activeTable = node.table;
+		questions = tablePool.map((table) => ({ table, multiplier: Math.floor(Math.random() * 12) + 1 }));
+		resetAnswerState();
+		challengeOutcome = null;
+		challengeEnding = false;
+		challengeAction = 'idle';
+		switchMusicForMode('quiz');
+		mode = 'quiz';
+		window.scrollTo({ top: 0, behavior: 'smooth' });
+		focusQuizQuestion();
+	}
+
+	function startChallenge(boss: StoryBossNode) {
+		const challengeTables = makeChallengeTableSequence([...boss.tables]);
+		if (challengeTables.length === 0) return;
+
+		storyTravel = null;
+		sessionOrigin = 'story';
+		activeStoryNodeId = boss.id;
+		sessionTables = [...boss.tables];
+		sessionDifficulty = storyDifficulty;
+		activeTable = challengeTables[0];
+		questions = challengeTables.map((table) => ({
+			table,
+			multiplier: Math.floor(Math.random() * 12) + 1
+		}));
+		resetAnswerState();
+		alienHealth = ALIEN_MAX_HEALTH;
+		playerShields = PLAYER_MAX_SHIELDS;
+		challengeAction = 'idle';
+		challengeActionId += 1;
+		challengeOutcome = null;
+		challengeEnding = false;
+		challengeAnimating = false;
+		challengePhase = 'intro';
+		setBattleDialogue(boss.bossName, boss.intro);
+		mode = 'challenge';
+		void battleAudio?.unlock().then(() => battleAudio?.playEncounter()).catch(() => {
+			// Combat remains playable if this browser refuses Web Audio.
+		});
+		if (!musicMutedByUser) {
+			if (musicStatus === 'loading') {
+				void bossMusicPlayer?.unlock().catch(() => {
+					// The queued play request gets another chance once the MIDI file has loaded.
+				});
+			}
+			void playMusicForMode('challenge');
+		}
+		window.scrollTo({ top: 0, behavior: 'smooth' });
+	}
+
+	function beginChallengeBattle() {
+		battleAudio?.playBattleReady();
+		challengePhase = 'battle';
+		setBattleDialogue(
+			'MISSION CONTROL',
+			`Solve ${currentQuestion.table} × ${currentQuestion.multiplier}. ${sessionDifficulty === 'hard' ? 'Type the answer' : 'Choose an answer'} to fire.`
+		);
+	}
+
+	function lockChallengeAnimation(duration = 780) {
+		if (combatTimer !== undefined) window.clearTimeout(combatTimer);
+		challengeAnimating = true;
+		combatTimer = window.setTimeout(() => {
+			combatTimer = undefined;
+			challengeAnimating = false;
+			if (mode === 'challenge' && battleDialogueComplete && !challengeEnding) {
+				focusChallengeCommand();
+			}
+		}, duration);
 	}
 
 	function toggleTable(table: number) {
@@ -330,10 +601,20 @@
 
 	function closeCoach() {
 		coachOpen = false;
-		focusHardInput();
+		if (mode === 'challenge') {
+			focusChallengeCommand();
+		} else if (sessionDifficulty === 'hard') {
+			focusHardInput();
+		} else {
+			void tick().then(() => document.querySelector<HTMLButtonElement>('.answer-button:not(:disabled)')?.focus());
+		}
 	}
 
 	function chooseAnswer(answer: number) {
+		if (mode === 'challenge') {
+			chooseChallengeAnswer(answer);
+			return;
+		}
 		if (feedback === 'correct' || (sessionDifficulty === 'easy' && wrongAnswers.includes(answer))) return;
 		if (answer === correctAnswer) {
 			const isFinalQuestion = questionIndex >= totalQuestions - 1;
@@ -346,7 +627,7 @@
 				streak += 1;
 				bestStreak = Math.max(bestStreak, streak);
 			}
-			setTimeout(isFinalQuestion ? finishQuiz : nextQuestion, 700);
+			scheduleFeedbackTransition(isFinalQuestion ? finishQuiz : nextQuestion);
 		} else {
 			playSound('incorrect');
 			feedback = 'wrong';
@@ -355,6 +636,70 @@
 			wrongAttemptCount += 1;
 			streak = 0;
 			if (wrongAttemptCount % 2 === 0) openCoach();
+		}
+	}
+
+	function chooseChallengeAnswer(answer: number) {
+		if (feedback === 'correct' || challengeEnding || challengeAnimating || (sessionDifficulty === 'easy' && wrongAnswers.includes(answer))) return;
+		const firstWrongAttempt = wrongAnswers.length === 0;
+		const nextBattle = resolveChallengeAttempt(
+			{ alienHealth, playerShields, outcome: challengeOutcome },
+			{ correct: answer === correctAnswer, firstWrongAttempt }
+		);
+
+		if (answer === correctAnswer) {
+			const isVictory = nextBattle.outcome === 'victory';
+			challengeAnimating = true;
+			battleAudio?.playPlayerAttack(isVictory);
+			if (isVictory) triggerHaptic('success');
+			feedback = 'correct';
+			hardInputStatus = 'correct';
+			alienHealth = nextBattle.alienHealth;
+			challengeOutcome = nextBattle.outcome;
+			challengeAction = 'hit';
+			challengeActionId += 1;
+			setBattleDialogue(
+				'MISSION CONTROL',
+				isVictory ? `${bossName}'s shield is down. The guardian is retreating!` : `Direct hit — ${nextBattle.alienHealth} shield ${nextBattle.alienHealth === 1 ? 'cell remains' : 'cells remain'}.`
+			);
+			if (firstWrongAttempt) {
+				score += 1;
+				streak += 1;
+				bestStreak = Math.max(bestStreak, streak);
+			}
+			challengeEnding = isVictory;
+			scheduleFeedbackTransition(
+				isVictory ? () => finishChallenge('victory') : nextChallengeQuestion,
+				isVictory ? 1700 : 780
+			);
+			return;
+		}
+
+		feedback = 'wrong';
+		hardInputStatus = 'wrong';
+		if (!wrongAnswers.includes(answer)) wrongAnswers = [...wrongAnswers, answer];
+		wrongAttemptCount += 1;
+		streak = 0;
+		if (nextBattle.playerShields !== playerShields) {
+			lockChallengeAnimation();
+			battleAudio?.playEnemyAttack(nextBattle.outcome === 'defeat');
+			playerShields = nextBattle.playerShields;
+			challengeOutcome = nextBattle.outcome;
+			challengeAction = 'counter';
+			challengeActionId += 1;
+			setBattleDialogue(
+				bossName,
+				nextBattle.outcome === 'defeat' ? 'Your shields are gone. This sector remains under my control!' : `Missed! Returning fire — ${nextBattle.playerShields} ship ${nextBattle.playerShields === 1 ? 'shield remains' : 'shields remain'}.`
+			);
+		} else {
+			battleAudio?.playRejectedCommand();
+			setBattleDialogue('MISSION CONTROL', 'The counterattack already landed this turn. Recalculate and try again.');
+		}
+		if (nextBattle.outcome === 'defeat') {
+			challengeEnding = true;
+			scheduleFeedbackTransition(() => finishChallenge('defeat'), 1700);
+		} else if (wrongAttemptCount % 2 === 0) {
+			openCoach();
 		}
 	}
 
@@ -379,6 +724,22 @@
 		void tick().then(() => hardInput?.focus());
 	}
 
+	function focusChallengeCommand() {
+		if (sessionDifficulty === 'hard') {
+			focusHardInput();
+			return;
+		}
+		void tick().then(() => document.querySelector<HTMLButtonElement>('.jrpg-answer:not(:disabled)')?.focus());
+	}
+
+	function focusQuizQuestion() {
+		if (sessionDifficulty === 'hard') {
+			focusHardInput();
+			return;
+		}
+		void tick().then(() => document.querySelector<HTMLElement>('.quiz-stage .equation')?.focus());
+	}
+
 	function nextQuestion() {
 		if (questionIndex >= totalQuestions - 1) {
 			finishQuiz();
@@ -395,13 +756,34 @@
 		focusHardInput();
 	}
 
+	function nextChallengeQuestion() {
+		if (questionIndex >= questions.length - 1) {
+			finishChallenge(alienHealth === 0 ? 'victory' : 'defeat');
+			return;
+		}
+		questionIndex += 1;
+		wrongAnswers = [];
+		typedAnswer = undefined;
+		hardInputStatus = 'idle';
+		feedback = null;
+		wrongAttemptCount = 0;
+		coachOpen = false;
+		coachExample = null;
+		challengeAnimating = false;
+		challengeAction = 'idle';
+		setBattleDialogue(
+			'MISSION CONTROL',
+			`Next calculation: ${currentQuestion.table} × ${currentQuestion.multiplier}. ${sessionDifficulty === 'hard' ? 'Type your attack.' : 'Choose your attack.'}`
+		);
+	}
+
 	function finishQuiz() {
 		const finalScore = score;
 		const stars = finalScore >= 9 ? 3 : finalScore >= 7 ? 2 : finalScore >= 5 ? 1 : 0;
 		const isCompleted = stars > 0;
 		if (sessionTables.length === 1) {
 			const table = sessionTables[0];
-			if (sessionDifficulty === 'hard') {
+			if (sessionOrigin === 'free-play' && sessionDifficulty === 'hard') {
 				const wasCompleted = progress.hardCompleted.includes(table);
 				progress = {
 					...progress,
@@ -409,7 +791,7 @@
 					hardBestScores: { ...progress.hardBestScores, [table]: Math.max(progress.hardBestScores[table] ?? 0, finalScore) },
 					totalStars: progress.totalStars + (isCompleted && !wasCompleted ? stars : 0)
 				};
-			} else {
+			} else if (sessionOrigin === 'free-play') {
 				const wasCompleted = progress.completed.includes(table);
 				progress = {
 					...progress,
@@ -418,9 +800,42 @@
 					totalStars: progress.totalStars + (isCompleted && !wasCompleted ? stars : 0)
 				};
 			}
-			localStorage.setItem('multiply-mission-progress', JSON.stringify(progress));
+			if (sessionOrigin === 'story' && activeStoryNodeId) {
+				const previousCount = progress.story.completedNodeIds.length;
+				const story = recordStoryResult(progress.story, activeStoryNodeId, finalScore, isCompleted);
+				if (story.completedNodeIds.length > previousCount && previousCount < STORY_NODES.length - 1) {
+					storyTravelId += 1;
+					storyTravel = { id: storyTravelId, fromIndex: previousCount, toIndex: previousCount + 1 };
+				}
+				progress = { ...progress, story };
+			}
+			saveProgress();
 		}
 		mode = 'result';
+		void tick().then(() => document.querySelector<HTMLElement>('#mission-result-title')?.focus());
+	}
+
+	async function finishChallenge(outcome: Exclude<ChallengeOutcome, null>) {
+		challengeOutcome = outcome;
+		challengeEnding = true;
+		const previousCount = progress.story.completedNodeIds.length;
+		const story = activeStoryNodeId
+			? recordStoryResult(progress.story, activeStoryNodeId, score, outcome === 'victory')
+			: progress.story;
+		if (story.completedNodeIds.length > previousCount && previousCount < STORY_NODES.length - 1) {
+			storyTravelId += 1;
+			storyTravel = { id: storyTravelId, fromIndex: previousCount, toIndex: previousCount + 1 };
+		}
+		progress = {
+			...progress,
+			challengeWins: progress.challengeWins + (outcome === 'victory' ? 1 : 0),
+			challengeBestScore: Math.max(progress.challengeBestScore, score),
+			story
+		};
+		saveProgress();
+		mode = 'challenge-result';
+		await tick();
+		document.querySelector<HTMLElement>('#challenge-result-title')?.focus();
 	}
 
 	function scrollToPageTop(event?: MouseEvent) {
@@ -433,17 +848,38 @@
 	}
 
 	function goHome() {
+		if (feedbackTimer !== undefined) window.clearTimeout(feedbackTimer);
+		feedbackTimer = undefined;
+		if (combatTimer !== undefined) window.clearTimeout(combatTimer);
+		combatTimer = undefined;
 		coachOpen = false;
+		challengeEnding = false;
+		challengeAnimating = false;
+		switchMusicForMode('home');
 		mode = 'home';
-		scrollToPageTop();
+		if (sessionOrigin === 'story') {
+			homeView = 'story';
+			const hasTravelAnimation = storyTravel !== null;
+			void tick().then(() => {
+				document.querySelector('#story-map')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+				if (hasTravelAnimation) return;
+				const currentNode = STORY_NODES[getStoryProgress(progress.story).currentIndex];
+				document.querySelector<HTMLButtonElement>(`#story-node-${currentNode.id}`)?.focus();
+			});
+		} else {
+			scrollToPageTop();
+		}
 	}
 
 	function handleKeydown(event: KeyboardEvent) {
+		if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
+		if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || (event.target instanceof HTMLElement && event.target.isContentEditable)) return;
 		if (coachOpen) {
 			if (event.key === 'Escape') closeCoach();
 			return;
 		}
-		if (mode !== 'quiz' || sessionDifficulty === 'hard' || feedback === 'correct') return;
+		if ((mode !== 'quiz' && mode !== 'challenge') || sessionDifficulty === 'hard' || feedback === 'correct' || challengeEnding) return;
+		if (mode === 'challenge' && (challengePhase !== 'battle' || !battleDialogueComplete || challengeAnimating)) return;
 		const number = Number(event.key);
 		if (number >= 1 && number <= answerOptions.length) chooseAnswer(answerOptions[number - 1]);
 	}
@@ -501,9 +937,9 @@
 				<span>Multiply Mission</span>
 			</button>
 			<div class="header-stats">
-				<div class="mini-stat" title="Tables completed">
-					<Trophy size={17} />
-					<strong>{progress.completed.length + progress.hardCompleted.length}</strong><span>/ 24</span>
+				<div class="mini-stat" title={homeView === 'story' ? 'Story stages cleared' : 'Tables completed'}>
+					{#if homeView === 'story'}<BookOpen size={17} />{:else}<Trophy size={17} />{/if}
+					<strong>{homeView === 'story' ? storyRoute.completedCount : progress.completed.length + progress.hardCompleted.length}</strong><span>/ {homeView === 'story' ? STORY_NODES.length : 24}</span>
 				</div>
 				<div class="mini-stat flame-stat" title="Mission stars">
 					<Star size={17} fill="currentColor" />
@@ -559,7 +995,47 @@
 			</div>
 		</section>
 
-		<section class="mission-section" id="missions">
+		<section class="play-mode-hub" id="missions" aria-labelledby="play-mode-title">
+			<div class="play-mode-heading">
+				<span class="section-kicker">Choose your route</span>
+				<h2 id="play-mode-title">How do you want to train?</h2>
+				<p>Follow the campaign one planet at a time, or build any mission you want.</p>
+			</div>
+			<div class="play-mode-tabs" role="group" aria-label="Game mode">
+				<button
+					class:selected={homeView === 'story'}
+					type="button"
+					aria-pressed={homeView === 'story'}
+					onclick={() => homeView = 'story'}
+				>
+					<span><MapIcon size={23} /></span>
+					<strong>Story mode</strong>
+					<small>Planets, progression, and bosses</small>
+				</button>
+				<button
+					class:selected={homeView === 'free-play'}
+					type="button"
+					aria-pressed={homeView === 'free-play'}
+					onclick={() => homeView = 'free-play'}
+				>
+					<span><Gamepad2 size={24} /></span>
+					<strong>Free play</strong>
+					<small>Choose any tables and difficulty</small>
+				</button>
+			</div>
+		</section>
+
+		{#if homeView === 'story'}
+			<StoryMap
+				progress={progress.story}
+				travel={storyTravel}
+				difficulty={storyDifficulty}
+				onselect={startStoryNode}
+				ondifficultychange={(difficulty) => storyDifficulty = difficulty}
+				ontravelcomplete={() => storyTravel = null}
+			/>
+		{:else}
+		<section class="mission-section" id="free-play-missions">
 			<div class="section-heading">
 				<div>
 					<span class="section-kicker">Mission control</span>
@@ -678,31 +1154,185 @@
 				{/each}
 			</div>
 		</section>
+		{/if}
 
 		<footer>
 			<button class="brand footer-brand" type="button" onclick={scrollToPageTop}><span class="brand-mark"><Rocket size={17} /></span>Multiply Mission</button>
 			<p>Made for curious minds and future math legends.</p>
 		</footer>
 	</main>
-{:else if mode === 'quiz'}
-	<main class="game-page">
+{:else if mode === 'quiz' || mode === 'challenge'}
+	<main class={['game-page', { 'challenge-page': mode === 'challenge' }]}>
 		<div class="game-stars" aria-hidden="true"></div>
 		<header class="game-header">
 			<Button variant="ghost" size="icon" onclick={goHome} aria-label="Leave mission"><ArrowLeft size={22} /></Button>
-			<div class="game-progress-wrap">
-				<div class="game-label"><span>{sessionLabel}</span><span>{questionIndex + 1} of {totalQuestions}</span></div>
-				<div class="game-progress"><span style:width={`${progressPercent}%`}></span></div>
-			</div>
-			<div class="streak-meter" class:hot={streak >= 3}><Flame size={18} fill={streak >= 3 ? 'currentColor' : 'none'} /><strong>{streak}</strong></div>
+			{#if mode === 'challenge'}
+				<div class="story-boss-title">
+					<span><BookOpen size={14} /> Story boss {activeStoryBoss?.bossNumber ?? 1} · {sessionDifficulty === 'hard' ? 'Hard' : 'Easy'}</span>
+					<strong>{bossName}</strong>
+				</div>
+				<span class="boss-round">{challengePhase === 'intro' ? 'VS' : `${questionIndex + 1}/${ALIEN_MAX_HEALTH}`}</span>
+			{:else}
+				<div class="game-progress-wrap">
+					<div class="game-label"><span>{sessionLabel}</span><span>{questionIndex + 1} of {totalQuestions}</span></div>
+					<div class="game-progress"><span style:width={`${progressPercent}%`}></span></div>
+				</div>
+				<div class="streak-meter" class:hot={streak >= 3}><Flame size={18} fill={streak >= 3 ? 'currentColor' : 'none'} /><strong>{streak}</strong></div>
+			{/if}
 		</header>
 
+		{#if mode === 'challenge'}
+			<section class="jrpg-battle-stage">
+				<div class="jrpg-arena">
+					<div class="battle-hud">
+						<div class="boss-vitals">
+							<span>{activeStoryBoss?.rank ?? 'Sector guardian'}</span>
+							<strong>{bossName}</strong>
+							<div
+								class="boss-shield-cells"
+								role="progressbar"
+								aria-label={`${bossName} shield strength`}
+								aria-valuemin="0"
+								aria-valuemax={ALIEN_MAX_HEALTH}
+								aria-valuenow={alienHealth}
+							>
+								{#each Array.from({ length: ALIEN_MAX_HEALTH }, (_, index) => index) as cell (cell)}
+									<i
+										class:active={cell < alienHealth}
+										class:breaking={challengeAction === 'hit' && cell === alienHealth}
+									></i>
+								{/each}
+							</div>
+						</div>
+						<div class="ship-vitals" class:critical={playerShields === 1}>
+							<span>Your shields</span>
+							<div aria-label={`${playerShields} of ${PLAYER_MAX_SHIELDS} ship shields left`}>
+								{#each Array.from({ length: PLAYER_MAX_SHIELDS }, (_, index) => index) as shield (shield)}
+									<Shield
+										size={19}
+										fill={shield < playerShields ? 'currentColor' : 'none'}
+										class={shield < playerShields ? 'active' : challengeAction === 'counter' && shield === playerShields ? 'breaking' : undefined}
+									/>
+								{/each}
+							</div>
+						</div>
+					</div>
+					<AlienBattleScene
+						{alienHealth}
+						{playerShields}
+						action={challengeAction}
+						actionId={challengeActionId}
+						outcome={challengeOutcome}
+					/>
+				</div>
+
+				{#key battleDialogue.id}
+					<BattleDialogue
+						speaker={battleDialogue.speaker}
+						text={battleDialogue.text}
+						oncharacter={playDialogueTick}
+						oncomplete={completeBattleDialogue}
+					/>
+				{/key}
+
+				{#if challengePhase === 'intro'}
+					<div class="battle-intro-controls">
+						<div>
+							<span>{sessionDifficulty === 'hard' ? 'Hard mode · Type every attack' : 'Easy mode · Choose your attacks'}</span>
+							<strong>{activeStoryBoss?.tables.map((table) => `×${table}`).join(' · ')}</strong>
+						</div>
+						<Button class="begin-battle" onclick={beginChallengeBattle} disabled={!battleDialogueComplete}>
+							Begin encounter <ArrowRight size={18} />
+						</Button>
+					</div>
+				{:else}
+					<div class="jrpg-command-deck">
+						<div class="jrpg-equation-panel">
+							<div class="jrpg-command-label">
+								<span>Attack calculation</span>
+								<strong><Star size={14} fill="currentColor" /> {score} first try</strong>
+							</div>
+							<div
+								class="jrpg-equation"
+								class:celebrate={feedback === 'correct'}
+								role="group"
+								aria-label={`${currentQuestion.table} times ${currentQuestion.multiplier} equals unknown`}
+							>
+								<span>{currentQuestion.table}</span><i>×</i><span>{currentQuestion.multiplier}</span><i>=</i><strong>?</strong>
+							</div>
+						</div>
+
+						{#if sessionDifficulty === 'easy'}
+							<div class="jrpg-answer-grid" aria-label="Battle commands">
+								{#each answerOptions as answer, index (answer)}
+									<button
+										class:correct-answer={feedback === 'correct' && answer === correctAnswer}
+										class:wrong-answer={wrongAnswers.includes(answer)}
+										class="answer-button jrpg-answer"
+										disabled={!battleDialogueComplete || challengeAnimating || feedback === 'correct' || wrongAnswers.includes(answer) || challengeEnding}
+										onclick={() => chooseAnswer(answer)}
+										aria-label={`Answer ${answer}`}
+									>
+										<span class="answer-key">{index + 1}</span>
+										<strong>{answer}</strong>
+										<span class="answer-icon">
+											{#if feedback === 'correct' && answer === correctAnswer}<Check size={21} strokeWidth={3} />{:else if wrongAnswers.includes(answer)}<X size={21} strokeWidth={3} />{/if}
+										</span>
+									</button>
+								{/each}
+							</div>
+						{:else}
+							<form class="jrpg-hard-answer-form" onsubmit={(event) => { event.preventDefault(); submitHardAnswer(); }}>
+								<div class="jrpg-hard-heading">
+									<span><Keyboard size={19} strokeWidth={2.5} /></span>
+									<div><small>Hard mode</small><strong>Manual targeting</strong></div>
+								</div>
+								{#key questionIndex}
+									<div class="jrpg-hard-controls">
+										<div class:wrong={hardInputStatus === 'wrong'} class:correct={hardInputStatus === 'correct'} class="hard-input-wrap">
+											<input
+												type="number"
+												inputmode="numeric"
+												bind:value={typedAnswer}
+												bind:this={hardInput}
+												oninput={handleHardInput}
+												onkeydown={handleHardKeydown}
+												disabled={!battleDialogueComplete || challengeAnimating || feedback === 'correct' || challengeEnding}
+												autocomplete="off"
+												aria-label="Type your attack answer"
+												placeholder="?"
+											/>
+											<span>{#if hardInputStatus === 'correct'}<Check size={24} strokeWidth={3} />{:else if hardInputStatus === 'wrong'}<X size={24} strokeWidth={3} />{/if}</span>
+										</div>
+										<Button
+											type="submit"
+											disabled={!battleDialogueComplete || challengeAnimating || feedback === 'correct' || challengeEnding || typedAnswer === undefined}
+										>
+											Fire <Target size={18} />
+										</Button>
+									</div>
+								{/key}
+								<p>Type the product, then press Enter to fire.</p>
+							</form>
+						{/if}
+					</div>
+				{/if}
+			</section>
+		{:else}
 		<section class="quiz-stage">
 			<div class="quiz-status">
 				<span class="question-tag">Question {questionIndex + 1}</span>
 				<span class="score-readout"><Star size={16} fill="currentColor" /> {score} first try</span>
 			</div>
 
-			<div class="equation" class:celebrate={feedback === 'correct'} class:hard-equation={sessionDifficulty === 'hard'}>
+			<div
+				class="equation"
+				class:celebrate={feedback === 'correct'}
+				class:hard-equation={sessionDifficulty === 'hard'}
+				role="group"
+				tabindex="-1"
+				aria-label={`${currentQuestion.table} times ${currentQuestion.multiplier} equals unknown`}
+			>
 				<span>{currentQuestion.table}</span><i>×</i><span>{currentQuestion.multiplier}</span><i>=</i><strong>?</strong>
 			</div>
 			<p class="quiz-prompt">{sessionDifficulty === 'hard' ? 'Type the answer' : 'Pick the answer'}</p>
@@ -716,6 +1346,7 @@
 							class="answer-button"
 							disabled={feedback === 'correct' || wrongAnswers.includes(answer)}
 							onclick={() => chooseAnswer(answer)}
+							aria-label={`Answer ${answer}`}
 						>
 							<span class="answer-key">{index + 1}</span>
 							<strong>{answer}</strong>
@@ -748,62 +1379,69 @@
 				</form>
 			{/if}
 
-				<div class="feedback-line" aria-live="polite">
-					{#if feedback === 'correct'}<span class="yes"><Sparkles size={18} /> Nailed it!</span>{:else if feedback === 'wrong'}<span class="nope">{wrongAttemptCount === 1 ? 'Not that one — try once more!' : 'Not yet — use the shortcut, then try again!'}</span>{:else}<span>{sessionDifficulty === 'hard' ? 'Press Enter to check' : 'Press 1–4 on your keyboard'}</span>{/if}
-				</div>
-			</section>
+			<div class="feedback-line" aria-live="polite">
+				{#if feedback === 'correct'}
+					<span class="yes"><Sparkles size={18} /> Nailed it!</span>
+				{:else if feedback === 'wrong'}
+					<span class="nope">{wrongAttemptCount === 1 ? 'Not that one — try once more!' : 'Not yet — use the shortcut, then try again!'}</span>
+				{:else}
+					<span>{sessionDifficulty === 'hard' ? 'Press Enter to check' : 'Press 1–4 on your keyboard'}</span>
+				{/if}
+			</div>
+		</section>
+		{/if}
 
-			{#if coachOpen && coachExample}
-				<div class="coach-layer">
-					<div class="coach-panel" role="dialog" aria-modal="true" aria-labelledby="coach-title" aria-describedby="coach-description">
-						<div class="coach-heading">
-							<span class="coach-mark"><Lightbulb size={22} strokeWidth={2.4} /></span>
-							<div>
-								<span>Mission Coach · ×{coachExample.table}</span>
-								<h2 id="coach-title">{coachExample.strategyName}</h2>
-							</div>
-						</div>
-						<p id="coach-description">{coachExample.strategySummary}</p>
-
-						{#key `${coachExample.table}-${coachExample.multiplier}`}
-							<div class="coach-example">
-								<div class="coach-example-top">
-									<span>Practice a different one</span>
-									<strong>{coachExample.table} × {coachExample.multiplier}</strong>
-								</div>
-								<ol class="coach-steps">
-									{#each coachExample.steps as step, index (step)}
-										<li style:--step={index}><span>{index + 1}</span><p>{step}</p></li>
-									{/each}
-								</ol>
-								<div class="coach-result"><span>That gives</span><strong>{coachExample.table} × {coachExample.multiplier} = {coachExample.answer}</strong></div>
-							</div>
-						{/key}
-
-						<div class="coach-actions">
-							<Button class="coach-primary" onclick={closeCoach}>Try my problem again <ArrowRight size={18} /></Button>
-							<Button variant="secondary" onclick={refreshCoachExample}><RefreshCw size={17} /> Another example</Button>
+		{#if coachOpen && coachExample}
+			<div class="coach-layer">
+				<div class="coach-panel" role="dialog" aria-modal="true" aria-labelledby="coach-title" aria-describedby="coach-description">
+					<div class="coach-heading">
+						<span class="coach-mark"><Lightbulb size={22} strokeWidth={2.4} /></span>
+						<div>
+							<span>Mission Coach · ×{coachExample.table}</span>
+							<h2 id="coach-title">{coachExample.strategyName}</h2>
 						</div>
 					</div>
+					<p id="coach-description">{coachExample.strategySummary}</p>
+
+					{#key `${coachExample.table}-${coachExample.multiplier}`}
+						<div class="coach-example">
+							<div class="coach-example-top">
+								<span>Practice a different one</span>
+								<strong>{coachExample.table} × {coachExample.multiplier}</strong>
+							</div>
+							<ol class="coach-steps">
+								{#each coachExample.steps as step, index (step)}
+									<li style:--step={index}><span>{index + 1}</span><p>{step}</p></li>
+								{/each}
+							</ol>
+							<div class="coach-result"><span>That gives</span><strong>{coachExample.table} × {coachExample.multiplier} = {coachExample.answer}</strong></div>
+						</div>
+					{/key}
+
+					<div class="coach-actions">
+						<Button class="coach-primary" onclick={closeCoach}>Try my problem again <ArrowRight size={18} /></Button>
+						<Button variant="secondary" onclick={refreshCoachExample}><RefreshCw size={17} /> Another example</Button>
+					</div>
 				</div>
-			{/if}
-		</main>
-{:else}
+			</div>
+		{/if}
+	</main>
+{:else if mode === 'result'}
 	<main class="result-page">
 		<div class="result-stars" aria-hidden="true"></div>
 		<section class="result-card">
 			<div class="result-burst" aria-hidden="true"></div>
-			<div class="earned-badge" class:locked={earnedStars === 0} class:master-badge={sessionDifficulty === 'hard' && earnedStars > 0}>
+			<div class="earned-badge" class:locked={earnedStars === 0} class:master-badge={sessionOrigin === 'free-play' && sessionDifficulty === 'hard' && earnedStars > 0}>
 				{#if earnedStars === 0}
 					<RotateCcw size={42} />
 				{:else if isSingleTable}
-					{#if sessionDifficulty === 'hard'}<Crown size={48} strokeWidth={1.9} />{:else}<Medal size={48} strokeWidth={1.8} />{/if}<strong>{sessionTables[0]}</strong>
+					{#if sessionOrigin === 'free-play' && sessionDifficulty === 'hard'}<Crown size={48} strokeWidth={1.9} />{:else}<Medal size={48} strokeWidth={1.8} />{/if}<strong>{sessionTables[0]}</strong>
 				{:else}
 					<Target size={44} strokeWidth={2} />
 				{/if}
 			</div>
-			<span class="result-kicker">{sessionDifficulty} mission complete</span>
-			<h1>{resultTitle}</h1>
+			<span class="result-kicker">{sessionOrigin === 'story' ? `Story ${sessionDifficulty} planet report` : `${sessionDifficulty} mission complete`}</span>
+			<h1 id="mission-result-title" tabindex="-1">{resultTitle}</h1>
 			<p>{resultDescription}</p>
 
 			<div class="stars-earned" aria-label={`${earnedStars} out of 3 stars`}>
@@ -819,8 +1457,58 @@
 			</div>
 
 			<div class="result-actions">
-				<Button onclick={() => startCustomQuiz(sessionTables, sessionDifficulty)}><RotateCcw size={18} /> Try again</Button>
-				<Button variant="secondary" onclick={goHome}><Home size={18} /> Mission map</Button>
+				{#if sessionOrigin === 'story'}
+					{#if earnedStars > 0}
+						<Button onclick={goHome}>Continue journey <ArrowRight size={18} /></Button>
+						<Button variant="secondary" onclick={() => activeStoryNode && startStoryNode(activeStoryNode)}><RotateCcw size={18} /> Replay planet</Button>
+					{:else}
+						<Button onclick={() => activeStoryNode && startStoryNode(activeStoryNode)}><RotateCcw size={18} /> Try planet again</Button>
+						<Button variant="secondary" onclick={goHome}><MapIcon size={18} /> Story map</Button>
+					{/if}
+				{:else}
+					<Button onclick={() => startCustomQuiz(sessionTables, sessionDifficulty)}><RotateCcw size={18} /> Try again</Button>
+					<Button variant="secondary" onclick={goHome}><Home size={18} /> Mission map</Button>
+				{/if}
+			</div>
+		</section>
+	</main>
+{:else}
+	<main class="result-page challenge-result-page">
+		<div class="result-stars" aria-hidden="true"></div>
+		<section class="result-card challenge-result-card">
+			<div class="challenge-result-scene">
+				<AlienBattleScene
+					{alienHealth}
+					{playerShields}
+					outcome={challengeOutcome}
+					compact
+				/>
+			</div>
+			<span class="result-kicker">Story boss report · {sessionDifficulty} mode · Gate {activeStoryBoss?.bossNumber ?? 1}</span>
+			<h1 id="challenge-result-title" tabindex="-1">{challengeResultTitle}</h1>
+			<p>{challengeResultDescription}</p>
+
+			{#if challengeOutcome === 'victory'}
+				<div class="challenge-reward">
+					<span><Trophy size={24} /></span>
+					<div><small>Route unlocked</small><strong>Sector {activeStoryBoss?.bossNumber ?? 1} cleared</strong></div>
+				</div>
+			{/if}
+
+			<div class="result-stats challenge-result-stats">
+				<div><strong>{alienHits}<small>/{ALIEN_MAX_HEALTH}</small></strong><span>Hits landed</span></div>
+				<div><strong>{playerShields}<small>/{PLAYER_MAX_SHIELDS}</small></strong><span>Shields left</span></div>
+				<div><strong>{progress.challengeWins}</strong><span>Total wins</span></div>
+			</div>
+
+			<div class="result-actions">
+				{#if challengeOutcome === 'victory'}
+					<Button onclick={goHome}>Continue journey <ArrowRight size={18} /></Button>
+					<Button variant="secondary" onclick={() => activeStoryBoss && startChallenge(activeStoryBoss)}><RotateCcw size={18} /> Battle again</Button>
+				{:else}
+					<Button onclick={() => activeStoryBoss && startChallenge(activeStoryBoss)}><RotateCcw size={18} /> Battle again</Button>
+					<Button variant="secondary" onclick={goHome}><MapIcon size={18} /> Story map</Button>
+				{/if}
 			</div>
 		</section>
 	</main>

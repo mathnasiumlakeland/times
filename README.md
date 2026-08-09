@@ -2,15 +2,22 @@
 
 Gamified multiplication practice for times tables 1–12, hosted at `times.mathnasium.pro`.
 
-- Easy mode uses four answer choices and awards mission patches.
-- Hard mode requires typed answers and awards separate crowned Master badges.
-- Progress, best scores, stars, and both reward tracks are saved in the browser.
+- Story Mode follows a sequential route through twelve table planets and four mixed-table alien bosses.
+- Free Play keeps unrestricted Easy, Hard, single-table, and custom mixed-table practice.
+- Boss encounters use six alien shield cells, three player shields, JRPG dialogue, and a dedicated battle theme.
+- Progress, best scores, stars, story stages, and challenge victories are saved in the browser.
 
 ## Local development
 
 ```bash
 bun install
 bun run dev
+```
+
+## Tests
+
+```bash
+bun run test
 ```
 
 ## Production build
@@ -29,3 +36,4 @@ The vendored Duolingo-style feedback sounds live in `static/audio/`:
 - `duolingo-correct.mp3`: correct answer
 - `duolingo-incorrect.mp3`: incorrect answer
 - `duolingo-complete.mp3`: completed mission
+- `story-boss-battle-theme.mid`: Story Mode boss theme
