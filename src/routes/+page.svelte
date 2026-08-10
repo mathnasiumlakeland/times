@@ -46,6 +46,7 @@
 	import { makeEmptyGameProgress, normalizeGameProgress, type GameProgress } from '$lib/game-progress';
 	import { MidiPlayer } from '$lib/midi-player';
 	import { makePracticeExample, type PracticeExample } from '$lib/practice-strategies';
+	import { makeQuestionSequence, type MultiplicationQuestion } from '$lib/question-sequence';
 	import {
 		STORY_NODES,
 		getStoryProgress,
@@ -59,11 +60,13 @@
 	type HomeView = 'story' | 'free-play';
 	type SessionOrigin = 'story' | 'free-play';
 	type ChallengePhase = 'intro' | 'battle';
+	type ChallengeTransition = 'next-question' | 'victory' | 'defeat' | null;
 	type Difficulty = 'easy' | 'hard';
-	type Question = { table: number; multiplier: number };
 	type SoundName = 'correct' | 'incorrect' | 'complete' | 'click' | 'click-release';
 	type MusicKind = 'regular' | 'boss';
 	const totalQuestions = 10;
+	const challengeDialogueHoldMs = 900;
+	const challengeTerminalHoldMs = 1100;
 	const progressStorageKey = 'multiply-mission-progress';
 	const tables = Array.from({ length: 12 }, (_, index) => index + 1);
 	const soundUrls: Record<SoundName, string> = {
@@ -104,7 +107,7 @@
 	let activeTable = $state(1);
 	let selectedTables = $state<number[]>([8]);
 	let sessionTables = $state<number[]>([1]);
-	let questions = $state<Question[]>([]);
+	let questions = $state<MultiplicationQuestion[]>([]);
 	let questionIndex = $state(0);
 	let score = $state(0);
 	let streak = $state(0);
@@ -135,6 +138,7 @@
 	let rocketBoostFrame: number | undefined;
 	let feedbackTimer: number | undefined;
 	let combatTimer: number | undefined;
+	let pendingChallengeTransition: ChallengeTransition = null;
 	let regularMusicPlayer: MidiPlayer | undefined;
 	let bossMusicPlayer: MidiPlayer | undefined;
 	let battleAudio: BattleAudio | undefined;
@@ -273,6 +277,18 @@
 
 	function completeBattleDialogue() {
 		battleDialogueComplete = true;
+		if (pendingChallengeTransition) {
+			const completedTransition = pendingChallengeTransition;
+			scheduleFeedbackTransition(() => {
+				pendingChallengeTransition = null;
+				if (completedTransition === 'next-question') {
+					nextChallengeQuestion();
+					return;
+				}
+				void finishChallenge(completedTransition);
+			}, completedTransition === 'next-question' ? challengeDialogueHoldMs : challengeTerminalHoldMs);
+			return;
+		}
 		if (coachOpen) return;
 		if (challengePhase === 'intro') {
 			void tick().then(() => document.querySelector<HTMLButtonElement>('.begin-battle')?.focus());
@@ -470,10 +486,7 @@
 		activeStoryNodeId = null;
 		sessionDifficulty = difficulty;
 		activeTable = chosen[0];
-		questions = tablePool.slice(0, totalQuestions).map((table) => ({
-			table,
-			multiplier: Math.floor(Math.random() * 12) + 1
-		}));
+		questions = makeQuestionSequence(tablePool.slice(0, totalQuestions));
 		resetAnswerState();
 		challengeOutcome = null;
 		challengeEnding = false;
@@ -499,7 +512,7 @@
 		sessionTables = [node.table];
 		sessionDifficulty = storyDifficulty;
 		activeTable = node.table;
-		questions = tablePool.map((table) => ({ table, multiplier: Math.floor(Math.random() * 12) + 1 }));
+		questions = makeQuestionSequence(tablePool);
 		resetAnswerState();
 		challengeOutcome = null;
 		challengeEnding = false;
@@ -520,10 +533,7 @@
 		sessionTables = [...boss.tables];
 		sessionDifficulty = storyDifficulty;
 		activeTable = challengeTables[0];
-		questions = challengeTables.map((table) => ({
-			table,
-			multiplier: Math.floor(Math.random() * 12) + 1
-		}));
+		questions = makeQuestionSequence(challengeTables);
 		resetAnswerState();
 		alienHealth = ALIEN_MAX_HEALTH;
 		playerShields = PLAYER_MAX_SHIELDS;
@@ -532,6 +542,7 @@
 		challengeOutcome = null;
 		challengeEnding = false;
 		challengeAnimating = false;
+		pendingChallengeTransition = null;
 		challengePhase = 'intro';
 		setBattleDialogue(boss.bossName, boss.intro);
 		mode = 'challenge';
@@ -564,7 +575,7 @@
 		combatTimer = window.setTimeout(() => {
 			combatTimer = undefined;
 			challengeAnimating = false;
-			if (mode === 'challenge' && battleDialogueComplete && !challengeEnding) {
+			if (mode === 'challenge' && battleDialogueComplete && !challengeEnding && !pendingChallengeTransition) {
 				focusChallengeCommand();
 			}
 		}, duration);
@@ -649,7 +660,8 @@
 
 		if (answer === correctAnswer) {
 			const isVictory = nextBattle.outcome === 'victory';
-			challengeAnimating = true;
+			pendingChallengeTransition = isVictory ? 'victory' : 'next-question';
+			lockChallengeAnimation();
 			battleAudio?.playPlayerAttack(isVictory);
 			if (isVictory) triggerHaptic('success');
 			feedback = 'correct';
@@ -660,7 +672,7 @@
 			challengeActionId += 1;
 			setBattleDialogue(
 				'MISSION CONTROL',
-				isVictory ? `${bossName}'s shield is down. The guardian is retreating!` : `Direct hit — ${nextBattle.alienHealth} shield ${nextBattle.alienHealth === 1 ? 'cell remains' : 'cells remain'}.`
+				isVictory ? `${bossName}'s shield is down. The guardian is retreating!` : `Direct hit. ${nextBattle.alienHealth} shield ${nextBattle.alienHealth === 1 ? 'cell remains' : 'cells remain'}.`
 			);
 			if (firstWrongAttempt) {
 				score += 1;
@@ -668,10 +680,6 @@
 				bestStreak = Math.max(bestStreak, streak);
 			}
 			challengeEnding = isVictory;
-			scheduleFeedbackTransition(
-				isVictory ? () => finishChallenge('victory') : nextChallengeQuestion,
-				isVictory ? 1700 : 780
-			);
 			return;
 		}
 
@@ -689,7 +697,7 @@
 			challengeActionId += 1;
 			setBattleDialogue(
 				bossName,
-				nextBattle.outcome === 'defeat' ? 'Your shields are gone. This sector remains under my control!' : `Missed! Returning fire — ${nextBattle.playerShields} ship ${nextBattle.playerShields === 1 ? 'shield remains' : 'shields remain'}.`
+				nextBattle.outcome === 'defeat' ? 'Your shields are gone. This sector remains under my control!' : `Missed! Returning fire. ${nextBattle.playerShields} ship ${nextBattle.playerShields === 1 ? 'shield remains' : 'shields remain'}.`
 			);
 		} else {
 			battleAudio?.playRejectedCommand();
@@ -697,7 +705,7 @@
 		}
 		if (nextBattle.outcome === 'defeat') {
 			challengeEnding = true;
-			scheduleFeedbackTransition(() => finishChallenge('defeat'), 1700);
+			pendingChallengeTransition = 'defeat';
 		} else if (wrongAttemptCount % 2 === 0) {
 			openCoach();
 		}
@@ -770,6 +778,7 @@
 		coachOpen = false;
 		coachExample = null;
 		challengeAnimating = false;
+		pendingChallengeTransition = null;
 		challengeAction = 'idle';
 		setBattleDialogue(
 			'MISSION CONTROL',
@@ -816,6 +825,7 @@
 	}
 
 	async function finishChallenge(outcome: Exclude<ChallengeOutcome, null>) {
+		pendingChallengeTransition = null;
 		challengeOutcome = outcome;
 		challengeEnding = true;
 		const previousCount = progress.story.completedNodeIds.length;
@@ -855,6 +865,7 @@
 		coachOpen = false;
 		challengeEnding = false;
 		challengeAnimating = false;
+		pendingChallengeTransition = null;
 		switchMusicForMode('home');
 		mode = 'home';
 		if (sessionOrigin === 'story') {
@@ -892,7 +903,7 @@
 </script>
 
 <svelte:head>
-	<title>Multiply Mission — Master times tables 1–12</title>
+	<title>Multiply Mission | Master times tables 1–12</title>
 	<meta
 		name="description"
 		content="A playful, gamified way to learn multiplication tables from 1 through 12."
@@ -1256,9 +1267,9 @@
 								class="jrpg-equation"
 								class:celebrate={feedback === 'correct'}
 								role="group"
-								aria-label={`${currentQuestion.table} times ${currentQuestion.multiplier} equals unknown`}
+								aria-label={`${currentQuestion.table} times ${currentQuestion.multiplier} equals ${feedback === 'correct' ? correctAnswer : 'unknown'}`}
 							>
-								<span>{currentQuestion.table}</span><i>×</i><span>{currentQuestion.multiplier}</span><i>=</i><strong>?</strong>
+								<span>{currentQuestion.table}</span><i>×</i><span>{currentQuestion.multiplier}</span><i>=</i><strong aria-live="polite" aria-atomic="true">{feedback === 'correct' ? correctAnswer : '?'}</strong>
 							</div>
 						</div>
 
@@ -1331,9 +1342,9 @@
 				class:hard-equation={sessionDifficulty === 'hard'}
 				role="group"
 				tabindex="-1"
-				aria-label={`${currentQuestion.table} times ${currentQuestion.multiplier} equals unknown`}
+				aria-label={`${currentQuestion.table} times ${currentQuestion.multiplier} equals ${feedback === 'correct' ? correctAnswer : 'unknown'}`}
 			>
-				<span>{currentQuestion.table}</span><i>×</i><span>{currentQuestion.multiplier}</span><i>=</i><strong>?</strong>
+				<span>{currentQuestion.table}</span><i>×</i><span>{currentQuestion.multiplier}</span><i>=</i><strong aria-live="polite" aria-atomic="true">{feedback === 'correct' ? correctAnswer : '?'}</strong>
 			</div>
 			<p class="quiz-prompt">{sessionDifficulty === 'hard' ? 'Type the answer' : 'Pick the answer'}</p>
 
@@ -1383,7 +1394,7 @@
 				{#if feedback === 'correct'}
 					<span class="yes"><Sparkles size={18} /> Nailed it!</span>
 				{:else if feedback === 'wrong'}
-					<span class="nope">{wrongAttemptCount === 1 ? 'Not that one — try once more!' : 'Not yet — use the shortcut, then try again!'}</span>
+					<span class="nope">{wrongAttemptCount === 1 ? 'Not that one. Try once more!' : 'Not yet. Use the shortcut, then try again!'}</span>
 				{:else}
 					<span>{sessionDifficulty === 'hard' ? 'Press Enter to check' : 'Press 1–4 on your keyboard'}</span>
 				{/if}

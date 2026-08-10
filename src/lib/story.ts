@@ -75,7 +75,7 @@ export const STORY_NODES: StoryNode[] = [
 	{ id: 'planet-12', kind: 'planet', table: 12, title: 'Dozen Dawn', chapter: 'Final planet', color: '#ffd45a', x: 750, y: 1390 },
 	{
 		id: 'boss-4', kind: 'boss', bossNumber: 4, bossName: 'Emperor Null', rank: 'Final guardian', tables: [10, 11, 12],
-		intro: 'No pilot has crossed the final gate. Combine tables ten, eleven, and twelve—or turn back now.', color: '#8d75ff', x: 835, y: 1650
+		intro: 'No pilot has crossed the final gate. Combine tables ten, eleven, and twelve, or turn back now.', color: '#8d75ff', x: 835, y: 1650
 	}
 ];
 

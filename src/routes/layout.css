@@ -260,7 +260,7 @@ footer { min-height: 120px; padding: 30px max(clamp(20px, 7vw, 110px), env(safe-
 .jrpg-command-label strong { display: flex; align-items: center; gap: 4px; color: #9b7400; font-size: inherit; font-variant-numeric: tabular-nums; }
 .jrpg-equation { display: flex; align-items: center; justify-content: center; gap: 10px; font-family: 'Space Grotesk'; font-size: clamp(40px, 5vw, 58px); line-height: 1; font-variant-numeric: tabular-nums; font-weight: 800; letter-spacing: -.06em; }
 .jrpg-equation i { color: #8c94a3; font-size: .55em; font-style: normal; }
-.jrpg-equation strong { min-width: .9em; display: grid; place-items: center; border-radius: 13px; color: var(--deep); background: var(--lime); box-shadow: 0 5px 0 #829600; transform: rotate(3deg); }
+.jrpg-equation strong { min-width: .9em; padding-inline: .16em; display: grid; place-items: center; border-radius: 13px; color: var(--deep); background: var(--lime); box-shadow: 0 5px 0 #829600; line-height: 1.05; white-space: nowrap; transform: rotate(3deg); }
 .jrpg-equation.celebrate strong { animation: pop .38s ease; }
 .jrpg-answer-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 11px; }
 .jrpg-answer { min-height: 76px; border-radius: 14px; }
@@ -291,7 +291,7 @@ footer { min-height: 120px; padding: 30px max(clamp(20px, 7vw, 110px), env(safe-
 .score-readout { display: flex; align-items: center; gap: 6px; color: #ffd765; font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .equation { display: flex; align-items: center; justify-content: center; gap: clamp(12px, 3vw, 28px); margin: clamp(44px, 8vh, 85px) 0 10px; font-size: clamp(65px, 11vw, 112px); line-height: 1; font-weight: 700; letter-spacing: -.06em; font-variant-numeric: tabular-nums; }
 .equation i { color: #69748e; font-style: normal; font-size: .55em; font-weight: 600; }
-.equation strong { min-width: .9em; display: grid; place-items: center; color: var(--deep); background: var(--lime); border-radius: 22px; box-shadow: 0 7px 0 #7d9000; transform: rotate(3deg); }
+.equation strong { min-width: .9em; padding-inline: .16em; display: grid; place-items: center; color: var(--deep); background: var(--lime); border-radius: 22px; box-shadow: 0 7px 0 #7d9000; line-height: 1.05; white-space: nowrap; transform: rotate(3deg); }
 .equation.celebrate strong { animation: pop .38s ease; }
 .equation.hard-equation strong { color: white; background: var(--violet); box-shadow: 0 7px 0 #5940cf; }
 .equation.challenge-equation { margin: clamp(22px, 3.5vh, 38px) 0 7px; font-size: clamp(49px, 7.5vw, 76px); }
