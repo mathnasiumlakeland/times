@@ -36,6 +36,20 @@ describe('story route', () => {
 		expect(reversePath.match(/ C /g)).toHaveLength(3);
 	});
 
+	it('keeps the planet four to planet two trip on every intervening route segment', () => {
+		const planetFourIndex = STORY_NODES.findIndex((node) => node.kind === 'planet' && node.table === 4);
+		const planetTwoIndex = STORY_NODES.findIndex((node) => node.kind === 'planet' && node.table === 2);
+		const planetThree = STORY_NODES.find((node) => node.kind === 'planet' && node.table === 3);
+		const firstBoss = STORY_NODES.find((node) => node.kind === 'boss' && node.bossNumber === 1);
+		const path = getStoryTravelPath(planetFourIndex, planetTwoIndex);
+
+		expect(path.startsWith(`M ${STORY_NODES[planetFourIndex].x} ${STORY_NODES[planetFourIndex].y}`)).toBe(true);
+		expect(path).toContain(`${firstBoss?.x} ${firstBoss?.y}`);
+		expect(path).toContain(`${planetThree?.x} ${planetThree?.y}`);
+		expect(path.endsWith(`${STORY_NODES[planetTwoIndex].x} ${STORY_NODES[planetTwoIndex].y}`)).toBe(true);
+		expect(path.match(/ C /g)).toHaveLength(3);
+	});
+
 	it('gives multi-stop journeys more flight time without making them unbounded', () => {
 		expect(getStoryTravelFlightMs(0, 1)).toBe(STORY_TRAVEL_TIMING.flightMs);
 		expect(getStoryTravelFlightMs(0, 4)).toBeGreaterThan(STORY_TRAVEL_TIMING.flightMs);

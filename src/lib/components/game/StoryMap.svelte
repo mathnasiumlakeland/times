@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
 	import type { Attachment } from 'svelte/attachments';
-	import { Check, Keyboard, LockKeyhole, MousePointer2, Rocket, Swords } from 'lucide-svelte';
+	import { Check, Keyboard, LockKeyhole, MousePointer2, Swords } from 'lucide-svelte';
 	import {
 		STORY_MAP_HEIGHT,
 		STORY_MAP_WIDTH,
@@ -38,26 +38,32 @@
 	} = $props();
 
 	type TravelPhase = 'idle' | 'waiting' | 'ignition' | 'flight' | 'arrival';
+	type RocketPoint = { x: number; y: number; angle: number };
+	const idleRocketAngle = -18;
 
 	let travelling = $state(false);
 	let arrivalAnnouncement = $state('');
 	let travelPhase = $state<TravelPhase>('idle');
 	let activeTravel = $state<StoryTravel | null>(null);
+	let rocketMotionPoint = $state<RocketPoint | null>(null);
 	let selectionTravelId = 0;
 	let travelTimers: number[] = [];
-	let cameraFrame: number | undefined;
+	let motionFrame: number | undefined;
 	let mapCanvas = $state<HTMLOListElement>();
 	let travelMotionGuide = $state<SVGPathElement>();
 	let routeProgress = $derived(getStoryProgress(progress));
 	let currentNode = $derived(STORY_NODES[routeProgress.currentIndex]);
 	let resolvedRocketIndex = $derived(STORY_NODES[rocketIndex] ? rocketIndex : routeProgress.currentIndex);
 	let rocketNode = $derived(STORY_NODES[resolvedRocketIndex]);
-	let travelStartNode = $derived(activeTravel ? STORY_NODES[activeTravel.fromIndex] : undefined);
 	let travelEndNode = $derived(activeTravel ? STORY_NODES[activeTravel.toIndex] : undefined);
+	let displayRocketPoint = $derived(
+		rocketMotionPoint ?? (rocketNode
+			? { x: rocketNode.x, y: rocketNode.y, angle: idleRocketAngle }
+			: { x: 0, y: 0, angle: idleRocketAngle })
+	);
 	let fullPath = makeStoryPath();
 	let completedPath = $derived(makeStoryPath(STORY_NODES.slice(0, routeProgress.currentIndex + 1)));
 	let travelPath = $derived(activeTravel ? getStoryTravelPath(activeTravel.fromIndex, activeTravel.toIndex) : '');
-	let travelFlightMs = $derived(activeTravel ? getStoryTravelFlightMs(activeTravel.fromIndex, activeTravel.toIndex) : 0);
 	const captureMapCanvas: Attachment<HTMLOListElement> = (element) => {
 		mapCanvas = element;
 		return () => {
@@ -98,8 +104,8 @@
 	function clearTravelTimers() {
 		for (const timer of travelTimers) window.clearTimeout(timer);
 		travelTimers = [];
-		if (cameraFrame !== undefined) window.cancelAnimationFrame(cameraFrame);
-		cameraFrame = undefined;
+		if (motionFrame !== undefined) window.cancelAnimationFrame(motionFrame);
+		motionFrame = undefined;
 	}
 
 	function centerStoryNode(index: number, behavior: ScrollBehavior) {
@@ -107,27 +113,55 @@
 			?.scrollIntoView({ behavior, block: 'center' });
 	}
 
-	function followTravelCamera(duration: number) {
+	function angleBetweenNodes(fromIndex: number, toIndex: number) {
+		const from = STORY_NODES[fromIndex];
+		const to = STORY_NODES[toIndex];
+		const canvasRect = mapCanvas?.getBoundingClientRect();
+		if (!from || !to || !canvasRect) return idleRocketAngle;
+		const scaleX = canvasRect.width / STORY_MAP_WIDTH;
+		const scaleY = canvasRect.height / STORY_MAP_HEIGHT;
+		return Math.atan2((to.y - from.y) * scaleY, (to.x - from.x) * scaleX) * 180 / Math.PI;
+	}
+
+	function animateRocketAlongPath(duration: number, followCamera: boolean) {
 		const guide = travelMotionGuide;
 		const canvas = mapCanvas;
-		if (!guide || !canvas || duration <= 0) return;
+		if (!guide || !canvas || duration <= 0) {
+			if (travelEndNode) {
+				rocketMotionPoint = { x: travelEndNode.x, y: travelEndNode.y, angle: rocketMotionPoint?.angle ?? idleRocketAngle };
+			}
+			return;
+		}
 		const pathLength = guide.getTotalLength();
+		const canvasRect = canvas.getBoundingClientRect();
+		const canvasPageTop = window.scrollY + canvasRect.top;
+		const scaleX = canvasRect.width / STORY_MAP_WIDTH;
+		const scaleY = canvasRect.height / STORY_MAP_HEIGHT;
+		const angleProbe = Math.max(2, pathLength * 0.003);
 		const startedAt = performance.now();
-		const follow = (now: number) => {
+		const move = (now: number) => {
 			const progress = Math.min(1, (now - startedAt) / duration);
-			const point = guide.getPointAtLength(pathLength * progress);
-			const canvasRect = canvas.getBoundingClientRect();
-			const canvasTop = window.scrollY + canvasRect.top;
-			const rocketPageY = canvasTop + (point.y / STORY_MAP_HEIGHT) * canvasRect.height;
-			window.scrollTo({ top: Math.max(0, rocketPageY - window.innerHeight * 0.5), behavior: 'auto' });
-			if (progress < 1) cameraFrame = window.requestAnimationFrame(follow);
-			else cameraFrame = undefined;
+			const distance = pathLength * progress;
+			const point = guide.getPointAtLength(distance);
+			const before = guide.getPointAtLength(Math.max(0, distance - angleProbe));
+			const after = guide.getPointAtLength(Math.min(pathLength, distance + angleProbe));
+			const angle = Math.atan2((after.y - before.y) * scaleY, (after.x - before.x) * scaleX) * 180 / Math.PI;
+			rocketMotionPoint = { x: point.x, y: point.y, angle };
+			if (followCamera) {
+				const rocketPageY = canvasPageTop + (point.y / STORY_MAP_HEIGHT) * canvasRect.height;
+				window.scrollTo({ top: Math.max(0, rocketPageY - window.innerHeight * 0.5), behavior: 'auto' });
+			}
+			if (progress < 1) motionFrame = window.requestAnimationFrame(move);
+			else motionFrame = undefined;
 		};
-		cameraFrame = window.requestAnimationFrame(follow);
+		move(startedAt);
 	}
 
 	function finishTravel(completedTravel: StoryTravel, launchNode?: StoryNode) {
+		const destination = STORY_NODES[completedTravel.toIndex];
+		const settledAngle = rocketMotionPoint?.angle ?? idleRocketAngle;
 		clearTravelTimers();
+		rocketMotionPoint = { x: destination.x, y: destination.y, angle: settledAngle };
 		travelPhase = 'idle';
 		travelling = false;
 		activeTravel = null;
@@ -139,7 +173,10 @@
 			onselect(launchNode);
 			return;
 		}
-		void tick().then(() => document.querySelector<HTMLButtonElement>(`#story-node-${STORY_NODES[completedTravel.toIndex].id}`)?.focus());
+		void tick().then(() => {
+			rocketMotionPoint = null;
+			document.querySelector<HTMLButtonElement>(`#story-node-${destination.id}`)?.focus();
+		});
 	}
 
 	function beginTravel(nextTravel: StoryTravel, launchNode?: StoryNode) {
@@ -152,10 +189,19 @@
 		activeTravel = nextTravel;
 		travelling = true;
 		travelPhase = 'waiting';
+		const direction = Math.sign(nextTravel.toIndex - nextTravel.fromIndex);
+		const firstHopIndex = nextTravel.fromIndex + direction;
+		const origin = STORY_NODES[nextTravel.fromIndex];
+		rocketMotionPoint = {
+			x: origin.x,
+			y: origin.y,
+			angle: angleBetweenNodes(nextTravel.fromIndex, firstHopIndex)
+		};
 		const destination = STORY_NODES[nextTravel.toIndex];
 		arrivalAnnouncement = `Rocket traveling to ${nodeTitle(destination)}.`;
 		const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 		if (reduceMotion) {
+			rocketMotionPoint = { x: destination.x, y: destination.y, angle: idleRocketAngle };
 			centerStoryNode(nextTravel.toIndex, 'auto');
 			finishTravel(nextTravel, launchNode);
 			return;
@@ -173,9 +219,18 @@
 			window.setTimeout(() => travelPhase = 'ignition', preflightMs),
 			window.setTimeout(() => {
 				travelPhase = 'flight';
-				if (nextTravel.reason === 'selection') void tick().then(() => followTravelCamera(flightMs));
+				void tick().then(() => animateRocketAlongPath(flightMs, nextTravel.reason === 'selection'));
 			}, flightStartsAt),
-			window.setTimeout(() => travelPhase = 'arrival', arrivalStartsAt),
+			window.setTimeout(() => {
+				if (motionFrame !== undefined) window.cancelAnimationFrame(motionFrame);
+				motionFrame = undefined;
+				rocketMotionPoint = {
+					x: destination.x,
+					y: destination.y,
+					angle: rocketMotionPoint?.angle ?? idleRocketAngle
+				};
+				travelPhase = 'arrival';
+			}, arrivalStartsAt),
 			window.setTimeout(
 				() => finishTravel(nextTravel, launchNode),
 				arrivalStartsAt + STORY_TRAVEL_TIMING.arrivalMs + landingHoldMs
@@ -201,19 +256,14 @@
 	}
 </script>
 
-{#snippet travelRocket(stateClass: string)}
+{#snippet travelRocket()}
 	<svg
 		class="travel-rocket-art"
-		x="-60"
-		y="-60"
-		width="120"
-		height="120"
-		viewBox="-48 -48 96 96"
+		viewBox="-42 -42 84 84"
 		preserveAspectRatio="xMidYMid meet"
-		overflow="visible"
 		aria-hidden="true"
 	>
-		<g class={['travel-ship', stateClass]}>
+		<g class="travel-ship">
 			<path class="travel-flame" d="M -23 0 L -38 -8 L -34 0 L -38 8 Z"></path>
 			<path class="travel-body" d="M -25 -13 L 18 -13 L 34 0 L 18 13 L -25 13 L -13 0 Z"></path>
 			<circle class="travel-window" cx="8" cy="0" r="6"></circle>
@@ -337,43 +387,39 @@
 
 			{#if travelling && travelPath}
 				<svg
-					class="story-travel-layer"
+					class="story-travel-guide"
 					viewBox={`0 0 ${STORY_MAP_WIDTH} ${STORY_MAP_HEIGHT}`}
 					preserveAspectRatio="none"
 					aria-hidden="true"
 				>
 					<path class="travel-motion-guide" d={travelPath} {@attach captureTravelGuide}></path>
-					{#if travelPhase === 'ignition' && travelStartNode}
-						<g transform={`translate(${travelStartNode.x} ${travelStartNode.y})`}>
-							{@render travelRocket('travel-ship-ignition')}
-						</g>
-					{:else if travelPhase === 'flight'}
-						<g class="travel-ship-flight">
-							<animateMotion dur={`${travelFlightMs / 1000}s`} path={travelPath} rotate="auto" fill="freeze"></animateMotion>
-							{@render travelRocket('')}
-						</g>
-					{:else if travelPhase === 'arrival' && travelEndNode}
-						<g class="travel-arrival" transform={`translate(${travelEndNode.x} ${travelEndNode.y})`}>
-							<svg x="-60" y="-60" width="120" height="120" viewBox="-48 -48 96 96" preserveAspectRatio="xMidYMid meet" overflow="visible">
-								<circle class="arrival-ring arrival-ring-one" r="28"></circle>
-								<circle class="arrival-ring arrival-ring-two" r="28"></circle>
-							</svg>
-							{@render travelRocket('travel-ship-arrived')}
-						</g>
-					{/if}
 				</svg>
+			{/if}
+
+			{#if travelPhase === 'arrival' && travelEndNode}
+				<div
+					class="travel-arrival"
+					style:left={`${(travelEndNode.x / STORY_MAP_WIDTH) * 100}%`}
+					style:top={`${(travelEndNode.y / STORY_MAP_HEIGHT) * 100}%`}
+					aria-hidden="true"
+				>
+					<i class="arrival-ring arrival-ring-one"></i>
+					<i class="arrival-ring arrival-ring-two"></i>
+				</div>
 			{/if}
 
 			{#if rocketNode}
 				<div
-					class="current-rocket"
-					class:travel-hidden={travelling && travelPhase !== 'waiting'}
-					style:left={`${(rocketNode.x / STORY_MAP_WIDTH) * 100}%`}
-					style:top={`${(rocketNode.y / STORY_MAP_HEIGHT) * 100}%`}
+					class={['map-rocket', travelling && 'is-travelling', travelling && `is-${travelPhase}`]}
+					style:left={`${(displayRocketPoint.x / STORY_MAP_WIDTH) * 100}%`}
+					style:top={`${(displayRocketPoint.y / STORY_MAP_HEIGHT) * 100}%`}
 					data-rocket-node={rocketNode.id}
+					data-travel-phase={travelPhase}
 					aria-hidden="true"
 				>
-					<span><Rocket size={28} strokeWidth={2.5} /></span>
+					<span class="rocket-heading" style:--rocket-angle={`${displayRocketPoint.angle}deg`}>
+						{@render travelRocket()}
+					</span>
 				</div>
 			{/if}
 		</ol>
@@ -621,13 +667,12 @@
 		pointer-events: none;
 	}
 
-	.story-travel-layer {
+	.story-travel-guide {
 		position: absolute;
-		z-index: 6;
 		inset: 0;
 		width: 100%;
 		height: 100%;
-		overflow: visible;
+		opacity: 0;
 		pointer-events: none;
 	}
 
@@ -784,30 +829,59 @@
 	.story-stop.is-locked .node-label { opacity: 0.45; }
 	.story-stop.is-current .node-label span { color: var(--lime); }
 
-	.current-rocket {
+	.map-rocket {
+		--rocket-dock-x: -40px;
+		--rocket-dock-y: -38px;
 		position: absolute;
 		z-index: 8;
-		width: 48px;
-		height: 48px;
+		width: 72px;
+		aspect-ratio: 1;
 		pointer-events: none;
-		transform: translate(-93px, -68px) rotate(42deg);
-		transition-property: opacity, filter, scale;
-		transition-duration: 240ms;
+		translate: calc(-50% + var(--rocket-dock-x)) calc(-50% + var(--rocket-dock-y));
+		transition-property: translate, opacity, filter, scale;
+		transition-duration: 320ms, 240ms, 240ms, 240ms;
+		transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
 	}
 
-	.current-rocket.travel-hidden { opacity: 0; scale: 0.25; filter: blur(4px); }
-	.current-rocket span { width: 48px; height: 48px; display: grid; place-items: center; border-radius: 16px; color: var(--deep); background: white; box-shadow: 0 6px 0 #9ca5b9, 0 13px 22px rgba(0, 0, 0, 0.28); animation: rocketHover 1.5s ease-in-out infinite alternate; }
+	.map-rocket.is-ignition,
+	.map-rocket.is-flight,
+	.map-rocket.is-arrival {
+		--rocket-dock-x: 0px;
+		--rocket-dock-y: 0px;
+	}
+
+	.rocket-heading {
+		width: 100%;
+		height: 100%;
+		display: block;
+		transform: rotate(var(--rocket-angle));
+		transform-origin: center;
+	}
+
+	.map-rocket:not(.is-flight) .rocket-heading {
+		transition: transform 220ms cubic-bezier(0.2, 0, 0, 1);
+	}
+
+	.travel-rocket-art {
+		width: 100%;
+		height: 100%;
+		display: block;
+		overflow: visible;
+		filter: drop-shadow(0 8px 7px rgba(0, 0, 0, 0.32));
+	}
+
+	.map-rocket:not(.is-travelling) .travel-rocket-art { animation: rocketHover 1.5s ease-in-out infinite alternate; }
 
 	.travel-body { fill: white; stroke: var(--deep); stroke-width: 4; }
 	.travel-window { fill: var(--sky); stroke: var(--deep); stroke-width: 3; }
 	.travel-flame { fill: var(--lime); filter: drop-shadow(0 0 7px rgba(214, 242, 71, 0.8)); }
-	.travel-ship { transform-box: fill-box; transform-origin: center; filter: drop-shadow(0 8px 7px rgba(0, 0, 0, 0.32)); }
-	.travel-ship-ignition { animation: rocketIgnition 90ms ease-in-out infinite alternate; }
-	.travel-ship-ignition .travel-flame { transform-box: fill-box; transform-origin: right center; animation: ignitionFlame 130ms ease-in-out infinite alternate; }
-	.travel-ship-flight { will-change: transform; }
-	.travel-ship-arrived { animation: rocketSettle 260ms cubic-bezier(0.2, 0, 0, 1) both; }
-	.travel-arrival { pointer-events: none; }
-	.arrival-ring { fill: none; stroke: var(--lime); stroke-width: 6; opacity: 0; }
+	.travel-ship { transform-box: fill-box; transform-origin: center; }
+	.map-rocket.is-ignition .travel-ship { animation: rocketIgnition 90ms ease-in-out infinite alternate; }
+	.map-rocket.is-ignition .travel-flame,
+	.map-rocket.is-flight .travel-flame { transform-box: fill-box; transform-origin: right center; animation: ignitionFlame 130ms ease-in-out infinite alternate; }
+	.map-rocket.is-arrival .travel-ship { animation: rocketSettle 260ms cubic-bezier(0.2, 0, 0, 1) both; }
+	.travel-arrival { position: absolute; z-index: 7; width: 56px; aspect-ratio: 1; translate: -50% -50%; pointer-events: none; }
+	.arrival-ring { position: absolute; inset: 0; border: 4px solid var(--lime); border-radius: 50%; opacity: 0; }
 	.arrival-ring-one { animation: arrivalBurst 420ms ease-out both; }
 	.arrival-ring-two { animation: arrivalBurst 420ms 70ms ease-out both; }
 
@@ -845,17 +919,20 @@
 		.node-label { top: 80px; width: 118px; }
 		.node-label strong { font-size: 10px; }
 		.node-label span { font-size: 7px; }
-		.current-rocket { transform: translate(-70px, -53px) rotate(42deg) scale(0.82); }
+		.map-rocket { --rocket-dock-x: -30px; --rocket-dock-y: -29px; width: 64px; }
 	}
 
 	@media (prefers-reduced-motion: reduce) {
 		.story-route-progress > div span,
 		.story-difficulty-switch button,
 		.story-stop button,
-		.current-rocket { transition-duration: 0.01ms; }
+		.map-rocket,
+		.rocket-heading { transition-duration: 0.01ms; }
 		.story-stop.is-current button::before,
 		.story-stop.travel-target button::after,
-		.current-rocket span { animation: none; }
-		.travel-ship { display: none; }
+		.travel-rocket-art,
+		.travel-ship,
+		.travel-flame,
+		.arrival-ring { animation: none; }
 	}
 </style>
