@@ -161,6 +161,12 @@
 		.dialogue-copy { min-height: 53px; font-size: 14px; }
 	}
 
+	@media (max-width: 650px) and (max-height: 760px) {
+		.battle-dialogue { min-height: 90px; padding: 22px 15px 13px; }
+		.dialogue-copy { min-height: 47px; padding-bottom: 13px; font-size: 13px; line-height: 1.4; }
+		.dialogue-hint { right: 15px; bottom: 8px; }
+	}
+
 	@media (prefers-reduced-motion: reduce) {
 		.dialogue-typed i { animation: none; }
 	}

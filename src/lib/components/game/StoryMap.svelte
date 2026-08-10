@@ -9,6 +9,7 @@
 		getStoryProgress,
 		getStoryTravelPath,
 		makeStoryPath,
+		STORY_TRAVEL_TIMING,
 		type StoryNode,
 		type StoryProgress,
 		type StoryTravel
@@ -30,10 +31,15 @@
 		ontravelcomplete?: () => void;
 	} = $props();
 
+	type TravelPhase = 'idle' | 'waiting' | 'ignition' | 'flight' | 'arrival';
+
 	let arriving = $state(false);
 	let arrivalAnnouncement = $state('');
+	let travelPhase = $state<TravelPhase>('idle');
 	let routeProgress = $derived(getStoryProgress(progress));
 	let currentNode = $derived(STORY_NODES[routeProgress.currentIndex]);
+	let travelStartNode = $derived(travel ? STORY_NODES[travel.fromIndex] : undefined);
+	let travelEndNode = $derived(travel ? STORY_NODES[travel.toIndex] : undefined);
 	let fullPath = makeStoryPath();
 	let completedPath = $derived(makeStoryPath(STORY_NODES.slice(0, routeProgress.currentIndex + 1)));
 	let travelPath = $derived(travel ? getStoryTravelPath(travel.fromIndex, travel.toIndex) : '');
@@ -41,8 +47,8 @@
 	onMount(() => {
 		if (!travel || !travelPath) return;
 		const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-		arriving = !reduceMotion;
 		const finishArrival = () => {
+			travelPhase = 'idle';
 			arriving = false;
 			arrivalAnnouncement = `${nodeTitle(currentNode)} unlocked.`;
 			ontravelcomplete();
@@ -52,8 +58,18 @@
 			finishArrival();
 			return;
 		}
-		const timer = window.setTimeout(finishArrival, 1550);
-		return () => window.clearTimeout(timer);
+
+		arriving = true;
+		travelPhase = 'waiting';
+		const flightStartsAt = STORY_TRAVEL_TIMING.ignitionDelayMs + STORY_TRAVEL_TIMING.ignitionMs;
+		const arrivalStartsAt = flightStartsAt + STORY_TRAVEL_TIMING.flightMs;
+		const timers = [
+			window.setTimeout(() => travelPhase = 'ignition', STORY_TRAVEL_TIMING.ignitionDelayMs),
+			window.setTimeout(() => travelPhase = 'flight', flightStartsAt),
+			window.setTimeout(() => travelPhase = 'arrival', arrivalStartsAt),
+			window.setTimeout(finishArrival, arrivalStartsAt + STORY_TRAVEL_TIMING.arrivalMs)
+		];
+		return () => timers.forEach((timer) => window.clearTimeout(timer));
 	});
 
 	function nodeTitle(node: StoryNode) {
@@ -80,6 +96,26 @@
 		onselect(node);
 	}
 </script>
+
+{#snippet travelRocket(stateClass: string)}
+	<svg
+		class="travel-rocket-art"
+		x="-60"
+		y="-60"
+		width="120"
+		height="120"
+		viewBox="-48 -48 96 96"
+		preserveAspectRatio="xMidYMid meet"
+		overflow="visible"
+		aria-hidden="true"
+	>
+		<g class={['travel-ship', stateClass]}>
+			<path class="travel-flame" d="M -23 0 L -38 -8 L -34 0 L -38 8 Z"></path>
+			<path class="travel-body" d="M -25 -13 L 18 -13 L 34 0 L 18 13 L -25 13 L -13 0 Z"></path>
+			<circle class="travel-window" cx="8" cy="0" r="6"></circle>
+		</g>
+	</svg>
+{/snippet}
 
 <section class="story-map-shell" id="story-map" aria-labelledby="story-map-title">
 	<div class="story-map-copy">
@@ -134,7 +170,7 @@
 		</div>
 	</div>
 
-	<nav class="story-route" aria-label="Story missions">
+	<nav class="story-route" id="story-route" aria-label="Story missions">
 		<ol class="story-map-canvas">
 			<svg
 				class="story-route-lines"
@@ -146,14 +182,6 @@
 				<path class="route-dashes" d={fullPath}></path>
 				{#if routeProgress.currentIndex > 0 || routeProgress.isComplete}
 					<path class="route-complete" d={completedPath}></path>
-				{/if}
-				{#if travel && travelPath && arriving}
-					<g class="travel-ship">
-						<animateMotion dur="1.45s" path={travelPath} rotate="auto" fill="freeze"></animateMotion>
-						<path class="travel-flame" d="M -23 0 L -38 -8 L -34 0 L -38 8 Z"></path>
-						<path class="travel-body" d="M -25 -13 L 18 -13 L 34 0 L 18 13 L -25 13 L -13 0 Z"></path>
-						<circle class="travel-window" cx="8" cy="0" r="6"></circle>
-					</g>
 				{/if}
 			</svg>
 
@@ -200,6 +228,34 @@
 					</div>
 				</li>
 			{/each}
+
+			{#if arriving && travelPath}
+				<svg
+					class="story-travel-layer"
+					viewBox={`0 0 ${STORY_MAP_WIDTH} ${STORY_MAP_HEIGHT}`}
+					preserveAspectRatio="none"
+					aria-hidden="true"
+				>
+					{#if travelPhase === 'ignition' && travelStartNode}
+						<g transform={`translate(${travelStartNode.x} ${travelStartNode.y})`}>
+							{@render travelRocket('travel-ship-ignition')}
+						</g>
+					{:else if travelPhase === 'flight'}
+						<g class="travel-ship-flight">
+							<animateMotion dur={`${STORY_TRAVEL_TIMING.flightMs / 1000}s`} path={travelPath} rotate="0" fill="freeze"></animateMotion>
+							{@render travelRocket('')}
+						</g>
+					{:else if travelPhase === 'arrival' && travelEndNode}
+						<g class="travel-arrival" transform={`translate(${travelEndNode.x} ${travelEndNode.y})`}>
+							<svg x="-60" y="-60" width="120" height="120" viewBox="-48 -48 96 96" preserveAspectRatio="xMidYMid meet" overflow="visible">
+								<circle class="arrival-ring arrival-ring-one" r="28"></circle>
+								<circle class="arrival-ring arrival-ring-two" r="28"></circle>
+							</svg>
+							{@render travelRocket('travel-ship-arrived')}
+						</g>
+					{/if}
+				</svg>
+			{/if}
 
 			{#if currentNode && !routeProgress.isComplete}
 				<div
@@ -427,7 +483,7 @@
 
 	.next-destination small { color: var(--sky); }
 
-	.story-route { min-width: 0; }
+	.story-route { min-width: 0; scroll-margin-block: 16px; }
 
 	.story-map-canvas {
 		position: relative;
@@ -449,6 +505,16 @@
 
 	.story-route-lines {
 		position: absolute;
+		inset: 0;
+		width: 100%;
+		height: 100%;
+		overflow: visible;
+		pointer-events: none;
+	}
+
+	.story-travel-layer {
+		position: absolute;
+		z-index: 6;
 		inset: 0;
 		width: 100%;
 		height: 100%;
@@ -619,12 +685,24 @@
 	.travel-body { fill: white; stroke: var(--deep); stroke-width: 4; }
 	.travel-window { fill: var(--sky); stroke: var(--deep); stroke-width: 3; }
 	.travel-flame { fill: var(--lime); filter: drop-shadow(0 0 7px rgba(214, 242, 71, 0.8)); }
-	.travel-ship { filter: drop-shadow(0 8px 7px rgba(0, 0, 0, 0.32)); }
+	.travel-ship { transform-box: fill-box; transform-origin: center; filter: drop-shadow(0 8px 7px rgba(0, 0, 0, 0.32)); }
+	.travel-ship-ignition { animation: rocketIgnition 90ms ease-in-out infinite alternate; }
+	.travel-ship-ignition .travel-flame { transform-box: fill-box; transform-origin: right center; animation: ignitionFlame 130ms ease-in-out infinite alternate; }
+	.travel-ship-flight { will-change: transform; }
+	.travel-ship-arrived { animation: rocketSettle 260ms cubic-bezier(0.2, 0, 0, 1) both; }
+	.travel-arrival { pointer-events: none; }
+	.arrival-ring { fill: none; stroke: var(--lime); stroke-width: 6; opacity: 0; }
+	.arrival-ring-one { animation: arrivalBurst 420ms ease-out both; }
+	.arrival-ring-two { animation: arrivalBurst 420ms 70ms ease-out both; }
 
 	.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
 	@keyframes currentPulse { from { opacity: 0.55; transform: scale(0.97); } to { opacity: 1; transform: scale(1.04); } }
 	@keyframes rocketHover { from { transform: translateY(-3px); } to { transform: translateY(3px); } }
+	@keyframes rocketIgnition { from { transform: translate(-2px, -1px) scale(0.96); } to { transform: translate(2px, 1px) scale(1.04); } }
+	@keyframes ignitionFlame { from { opacity: 0.48; transform: scaleX(0.55); } to { opacity: 1; transform: scaleX(1.18); } }
+	@keyframes rocketSettle { from { opacity: 0; transform: scale(1.18); filter: blur(4px); } to { opacity: 1; transform: scale(1); filter: blur(0); } }
+	@keyframes arrivalBurst { 0% { opacity: 0.9; transform: scale(0.35); } 100% { opacity: 0; transform: scale(2.15); } }
 
 	@media (max-width: 920px) {
 		.story-map-shell { grid-template-columns: 1fr; }

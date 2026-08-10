@@ -858,6 +858,10 @@
 	}
 
 	function goHome() {
+		const hasTravelAnimation = sessionOrigin === 'story' && storyTravel !== null;
+		if (hasTravelAnimation) {
+			battleAudio?.playStoryTravel(window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+		}
 		if (feedbackTimer !== undefined) window.clearTimeout(feedbackTimer);
 		feedbackTimer = undefined;
 		if (combatTimer !== undefined) window.clearTimeout(combatTimer);
@@ -870,11 +874,22 @@
 		mode = 'home';
 		if (sessionOrigin === 'story') {
 			homeView = 'story';
-			const hasTravelAnimation = storyTravel !== null;
 			void tick().then(() => {
-				document.querySelector('#story-map')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-				if (hasTravelAnimation) return;
 				const currentNode = STORY_NODES[getStoryProgress(progress.story).currentIndex];
+				if (hasTravelAnimation) {
+					const destination = document.querySelector<HTMLElement>(`#story-node-${currentNode.id}`);
+					if (destination) {
+						const destinationRect = destination.getBoundingClientRect();
+						const centeredTop = window.scrollY + destinationRect.top - (window.innerHeight - destinationRect.height) / 2;
+						const root = document.documentElement;
+						const previousScrollBehavior = root.style.scrollBehavior;
+						root.style.scrollBehavior = 'auto';
+						window.scrollTo({ top: Math.max(0, centeredTop), behavior: 'auto' });
+						window.requestAnimationFrame(() => root.style.scrollBehavior = previousScrollBehavior);
+					}
+					return;
+				}
+				document.querySelector('#story-map')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 				document.querySelector<HTMLButtonElement>(`#story-node-${currentNode.id}`)?.focus();
 			});
 		} else {
@@ -1470,15 +1485,15 @@
 			<div class="result-actions">
 				{#if sessionOrigin === 'story'}
 					{#if earnedStars > 0}
-						<Button onclick={goHome}>Continue journey <ArrowRight size={18} /></Button>
-						<Button variant="secondary" onclick={() => activeStoryNode && startStoryNode(activeStoryNode)}><RotateCcw size={18} /> Replay planet</Button>
+						<Button data-compact-label="Continue" onclick={goHome}>Continue journey <ArrowRight size={18} /></Button>
+						<Button data-compact-label="Replay" variant="secondary" onclick={() => activeStoryNode && startStoryNode(activeStoryNode)}><RotateCcw size={18} /> Replay planet</Button>
 					{:else}
-						<Button onclick={() => activeStoryNode && startStoryNode(activeStoryNode)}><RotateCcw size={18} /> Try planet again</Button>
-						<Button variant="secondary" onclick={goHome}><MapIcon size={18} /> Story map</Button>
+						<Button data-compact-label="Retry" onclick={() => activeStoryNode && startStoryNode(activeStoryNode)}><RotateCcw size={18} /> Try planet again</Button>
+						<Button data-compact-label="Map" variant="secondary" onclick={goHome}><MapIcon size={18} /> Story map</Button>
 					{/if}
 				{:else}
-					<Button onclick={() => startCustomQuiz(sessionTables, sessionDifficulty)}><RotateCcw size={18} /> Try again</Button>
-					<Button variant="secondary" onclick={goHome}><Home size={18} /> Mission map</Button>
+					<Button data-compact-label="Retry" onclick={() => startCustomQuiz(sessionTables, sessionDifficulty)}><RotateCcw size={18} /> Try again</Button>
+					<Button data-compact-label="Map" variant="secondary" onclick={goHome}><Home size={18} /> Mission map</Button>
 				{/if}
 			</div>
 		</section>
@@ -1514,11 +1529,11 @@
 
 			<div class="result-actions">
 				{#if challengeOutcome === 'victory'}
-					<Button onclick={goHome}>Continue journey <ArrowRight size={18} /></Button>
-					<Button variant="secondary" onclick={() => activeStoryBoss && startChallenge(activeStoryBoss)}><RotateCcw size={18} /> Battle again</Button>
+					<Button data-compact-label="Continue" onclick={goHome}>Continue journey <ArrowRight size={18} /></Button>
+					<Button data-compact-label="Rematch" variant="secondary" onclick={() => activeStoryBoss && startChallenge(activeStoryBoss)}><RotateCcw size={18} /> Battle again</Button>
 				{:else}
-					<Button onclick={() => activeStoryBoss && startChallenge(activeStoryBoss)}><RotateCcw size={18} /> Battle again</Button>
-					<Button variant="secondary" onclick={goHome}><MapIcon size={18} /> Story map</Button>
+					<Button data-compact-label="Rematch" onclick={() => activeStoryBoss && startChallenge(activeStoryBoss)}><RotateCcw size={18} /> Battle again</Button>
+					<Button data-compact-label="Map" variant="secondary" onclick={goHome}><MapIcon size={18} /> Story map</Button>
 				{/if}
 			</div>
 		</section>

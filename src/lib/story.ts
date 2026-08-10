@@ -1,6 +1,12 @@
 export const STORY_PROGRESS_VERSION = 1;
 export const STORY_MAP_WIDTH = 1000;
 export const STORY_MAP_HEIGHT = 1770;
+export const STORY_TRAVEL_TIMING = {
+	ignitionDelayMs: 120,
+	ignitionMs: 560,
+	flightMs: 1450,
+	arrivalMs: 260
+} as const;
 
 export type StoryNodeStatus = 'completed' | 'current' | 'locked';
 

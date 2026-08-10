@@ -1,3 +1,5 @@
+import { STORY_TRAVEL_TIMING } from './story';
+
 type AudioContextWindow = Window & {
 	webkitAudioContext?: typeof AudioContext;
 };
@@ -25,11 +27,10 @@ const SILENCE = 0.0001;
 const IMPACT_DELAY_SECONDS = 0.32;
 
 /**
- * Procedural Web Audio effects for the Story Mode battle screen.
+ * Procedural Web Audio effects for Story Mode battles and map travel.
  *
- * Call `unlock()` from the gesture that enters a boss encounter. The remaining
- * methods can then schedule layered effects on the same AudioContext, including
- * the impact that lands 320ms after each projectile launches.
+ * Boss encounters call `unlock()` from their entry gesture. Story travel starts
+ * from the Continue gesture, so every layered effect shares the same AudioContext.
  */
 export class BattleAudio {
 	private context?: AudioContext;
@@ -99,6 +100,71 @@ export class BattleAudio {
 				type: index === 2 ? 'square' : 'triangle'
 			});
 		}
+	}
+
+	playStoryTravel(reducedMotion = false) {
+		const ignitionAt = this.startTime(STORY_TRAVEL_TIMING.ignitionDelayMs / 1000);
+		if (ignitionAt === undefined) return;
+
+		if (reducedMotion) {
+			this.storyArrival(ignitionAt);
+			return;
+		}
+
+		const flightAt = ignitionAt + STORY_TRAVEL_TIMING.ignitionMs / 1000;
+		const arrivalAt = flightAt + STORY_TRAVEL_TIMING.flightMs / 1000;
+
+		this.tone(ignitionAt, {
+			duration: STORY_TRAVEL_TIMING.ignitionMs / 1000,
+			frequencyStart: 54,
+			frequencyEnd: 118,
+			peak: 0.16,
+			type: 'sawtooth',
+			attack: 0.08
+		});
+		this.noise(ignitionAt, {
+			duration: STORY_TRAVEL_TIMING.ignitionMs / 1000,
+			peak: 0.075,
+			filterType: 'lowpass',
+			filterStart: 170,
+			filterEnd: 920,
+			attack: 0.09
+		});
+		this.tone(flightAt, {
+			duration: 0.42,
+			frequencyStart: 116,
+			frequencyEnd: 740,
+			peak: 0.13,
+			type: 'sawtooth',
+			attack: 0.01
+		});
+		this.noise(flightAt, {
+			duration: 0.96,
+			peak: 0.1,
+			filterType: 'bandpass',
+			filterStart: 520,
+			filterEnd: 1650,
+			attack: 0.025
+		});
+		this.noise(flightAt + 0.72, {
+			duration: 0.73,
+			peak: 0.07,
+			filterType: 'highpass',
+			filterStart: 520,
+			filterEnd: 1420,
+			attack: 0.03
+		});
+		for (const pulse of [0.2, 0.58, 0.96]) {
+			this.tone(flightAt + pulse, {
+				duration: 0.23,
+				frequencyStart: 104,
+				frequencyEnd: 126,
+				peak: 0.052,
+				type: 'triangle',
+				attack: 0.025
+			});
+		}
+		this.storyArrival(arrivalAt);
 	}
 
 	playPlayerAttack(finisher = false) {
@@ -306,6 +372,34 @@ export class BattleAudio {
 				frequencyEnd: index === 3 ? 62 : frequency * 0.88,
 				peak: index === 3 ? 0.17 : 0.1,
 				type: index === 3 ? 'sawtooth' : 'triangle'
+			});
+		}
+	}
+
+	private storyArrival(startAt: number) {
+		this.noise(startAt, {
+			duration: 0.2,
+			peak: 0.12,
+			filterType: 'lowpass',
+			filterStart: 760,
+			filterEnd: 120,
+			attack: 0.004
+		});
+		this.tone(startAt, {
+			duration: 0.3,
+			frequencyStart: 122,
+			frequencyEnd: 48,
+			peak: 0.13,
+			type: 'sine',
+			attack: 0.004
+		});
+		for (const [index, frequency] of [523, 659, 784].entries()) {
+			this.tone(startAt + 0.07 + index * 0.08, {
+				duration: index === 2 ? 0.48 : 0.22,
+				frequencyStart: frequency,
+				frequencyEnd: frequency * 1.015,
+				peak: index === 2 ? 0.11 : 0.075,
+				type: 'triangle'
 			});
 		}
 	}

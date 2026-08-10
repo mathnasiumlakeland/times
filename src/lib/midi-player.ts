@@ -15,6 +15,43 @@ type MidiNote = {
 	channel: number;
 };
 
+const silentBridgeSampleRate = 8000;
+const silentBridgeDurationSeconds = 0.25;
+
+function writeAscii(view: DataView, offset: number, value: string) {
+	for (let index = 0; index < value.length; index++) view.setUint8(offset + index, value.charCodeAt(index));
+}
+
+/**
+ * Creates real silent PCM data for the iOS media bridge. iOS Safari does not
+ * reliably honor programmatic HTMLMediaElement volume changes, so an audible
+ * file with volume set to zero can still leak through the device speaker.
+ */
+export function createSilentWavBuffer() {
+	const channelCount = 1;
+	const bytesPerSample = 2;
+	const sampleCount = Math.ceil(silentBridgeSampleRate * silentBridgeDurationSeconds);
+	const dataSize = sampleCount * channelCount * bytesPerSample;
+	const buffer = new ArrayBuffer(44 + dataSize);
+	const view = new DataView(buffer);
+
+	writeAscii(view, 0, 'RIFF');
+	view.setUint32(4, 36 + dataSize, true);
+	writeAscii(view, 8, 'WAVE');
+	writeAscii(view, 12, 'fmt ');
+	view.setUint32(16, 16, true);
+	view.setUint16(20, 1, true);
+	view.setUint16(22, channelCount, true);
+	view.setUint32(24, silentBridgeSampleRate, true);
+	view.setUint32(28, silentBridgeSampleRate * channelCount * bytesPerSample, true);
+	view.setUint16(32, channelCount * bytesPerSample, true);
+	view.setUint16(34, bytesPerSample * 8, true);
+	writeAscii(view, 36, 'data');
+	view.setUint32(40, dataSize, true);
+
+	return buffer;
+}
+
 function readUint32(bytes: Uint8Array, offset: number) {
 	return (bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3];
 }
@@ -126,6 +163,7 @@ export class MidiPlayer {
 	private sources = new Set<AudioScheduledSourceNode>();
 	private drumNoiseBuffer?: AudioBuffer;
 	private iosMediaBridge?: HTMLAudioElement;
+	private iosMediaBridgeUrl?: string;
 	private playbackStartedAt = 0;
 	private loopNumber = 0;
 	private nextNoteIndex = 0;
@@ -171,6 +209,15 @@ export class MidiPlayer {
 
 	destroy() {
 		this.stop();
+		if (this.iosMediaBridge) {
+			this.iosMediaBridge.removeAttribute('src');
+			this.iosMediaBridge.load();
+			this.iosMediaBridge = undefined;
+		}
+		if (this.iosMediaBridgeUrl) {
+			URL.revokeObjectURL(this.iosMediaBridgeUrl);
+			this.iosMediaBridgeUrl = undefined;
+		}
 		void this.context?.close();
 		this.context = undefined;
 		this.output = undefined;
@@ -278,11 +325,15 @@ export class MidiPlayer {
 	}
 
 	private startIosMediaBridge() {
-		const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent);
+		const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent)
+			|| (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 		if (!isIos) return;
-		this.iosMediaBridge ??= new Audio('/audio/duolingo-correct.mp3');
-		this.iosMediaBridge.loop = true;
-		this.iosMediaBridge.volume = 0;
+		if (!this.iosMediaBridge) {
+			this.iosMediaBridgeUrl = URL.createObjectURL(new Blob([createSilentWavBuffer()], { type: 'audio/wav' }));
+			this.iosMediaBridge = new Audio(this.iosMediaBridgeUrl);
+			this.iosMediaBridge.preload = 'auto';
+			this.iosMediaBridge.loop = true;
+		}
 		void this.iosMediaBridge.play().catch(() => {
 			// The Audio Session API above is the primary path on current Safari.
 		});

@@ -356,6 +356,7 @@ footer { min-height: 120px; padding: 30px max(clamp(20px, 7vw, 110px), env(safe-
 .earned-badge.master-badge { background: var(--gold); box-shadow: 0 7px 0 #b17800, 0 0 0 7px var(--violet), 0 20px 35px rgba(141,117,255,.22); }
 .result-kicker { color: #7a62e7; }
 .result-card h1 { margin-top: 8px; font-size: clamp(39px, 7vw, 59px); line-height: 1; letter-spacing: -.06em; }
+.result-card h1:focus { outline: 0; }
 .result-card > p { margin-top: 14px; color: #707686; font-size: 17px; }
 .stars-earned { margin: 25px 0; display: flex; justify-content: center; gap: 7px; color: #c8c7c0; }
 .stars-earned .active { color: #f0bd28; filter: drop-shadow(0 3px 0 #ba8610); }
@@ -520,11 +521,54 @@ footer { min-height: 120px; padding: 30px max(clamp(20px, 7vw, 110px), env(safe-
 	.coach-result strong { font-size: 17px; }
 	.coach-actions { flex-direction: column; }
 	.coach-actions button { width: 100%; }
-	.result-card { padding: 36px 20px; border-radius: 25px; }
-	.challenge-result-card { padding-top: 28px; }
-	.challenge-result-scene { margin: -28px -20px 27px; }
-	.result-actions { flex-direction: column; }
-	.result-actions button { width: 100%; }
+	.result-page { align-content: center; padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(76px, calc(env(safe-area-inset-bottom) + 66px)) max(12px, env(safe-area-inset-left)); }
+	.result-card { padding: 24px 18px 20px; border-radius: 25px; }
+	.earned-badge { width: 78px; margin-bottom: 15px; box-shadow: 0 5px 0 #849700, 0 13px 24px rgba(134,151,0,.16); }
+	.earned-badge :is(svg) { width: 38px; height: 38px; }
+	.earned-badge strong { font-size: 17px; }
+	.result-kicker { display: block; font-size: 9px; line-height: 1.3; }
+	.result-card h1 { margin-top: 6px; font-size: clamp(32px, 9.5vw, 40px); text-wrap: balance; }
+	.result-card > p { margin-top: 9px; font-size: 14px; line-height: 1.4; text-wrap: pretty; }
+	.stars-earned { margin: 14px 0 13px; gap: 4px; }
+	.stars-earned :is(svg) { width: 28px; height: 28px; }
+	.result-stats { margin: 16px 0 18px; padding: 12px 0; }
+	.result-stats strong { font-size: 23px; }
+	.result-stats small { font-size: 11px; }
+	.result-stats span { font-size: 8px; }
+	.result-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+	.result-actions button { width: 100%; min-height: 44px; padding-inline: 10px; font-size: 13px; }
+	.challenge-result-card { padding-top: 18px; }
+	.challenge-result-scene { height: 118px; margin: -18px -18px 17px; overflow: hidden; }
+	.challenge-result-scene .battle-scene { height: 100%; aspect-ratio: auto; border-radius: 25px 25px 0 0; }
+	.challenge-result-card h1 { font-size: clamp(30px, 8.8vw, 37px); }
+	.challenge-reward { margin-top: 14px; padding: 7px 12px 7px 7px; gap: 9px; border-radius: 14px; }
+	.challenge-reward > span { width: 36px; height: 36px; border-radius: 10px; }
+	.challenge-reward strong { font-size: 14px; }
+}
+
+@media (max-width: 650px) and (max-height: 760px) {
+	.game-header { min-height: calc(72px + env(safe-area-inset-top)); }
+	.jrpg-battle-stage { padding-top: 0; }
+	.jrpg-arena { height: 180px; margin-bottom: 14px; }
+	.boss-vitals { min-width: 158px; }
+	.boss-shield-cells i { width: 18px; }
+	.jrpg-command-deck { margin-top: 12px; padding: 7px; gap: 8px; }
+	.jrpg-equation-panel { min-height: 88px; padding: 10px 12px; }
+	.jrpg-equation { font-size: 37px; }
+	.jrpg-answer-grid { gap: 7px; }
+	.jrpg-answer-grid .jrpg-answer { min-height: 55px; }
+	.jrpg-hard-answer-form { min-height: 122px; padding: 9px; gap: 8px; }
+	.jrpg-hard-controls .hard-input-wrap input { height: 54px; font-size: 28px; }
+	.quiz-stage { min-height: calc(100svh - 72px - env(safe-area-inset-top)); min-height: calc(100dvh - 72px - env(safe-area-inset-top)); padding-top: 28px; }
+	.equation { margin-top: 42px; }
+	.answer-button { min-height: 72px; }
+	.feedback-line { margin-top: 18px; }
+}
+
+@media (max-width: 360px) {
+	.result-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+	.result-actions button { gap: 4px; padding-inline: 7px; font-size: 0; }
+	.result-actions button::before { content: attr(data-compact-label); font-size: 12px; }
 }
 
 @media (min-width: 651px) {
