@@ -49,6 +49,7 @@
 	let selectionTravelId = 0;
 	let travelTimers: number[] = [];
 	let motionFrame: number | undefined;
+	let cameraScrollBehavior: string | null = null;
 	let mapCanvas = $state<HTMLOListElement>();
 	let travelMotionGuide = $state<SVGPathElement>();
 	let routeProgress = $derived(getStoryProgress(progress));
@@ -106,6 +107,20 @@
 		travelTimers = [];
 		if (motionFrame !== undefined) window.cancelAnimationFrame(motionFrame);
 		motionFrame = undefined;
+		stopFollowingRocket();
+	}
+
+	function startFollowingRocket() {
+		if (cameraScrollBehavior !== null) return;
+		const root = document.documentElement;
+		cameraScrollBehavior = root.style.scrollBehavior;
+		root.style.scrollBehavior = 'auto';
+	}
+
+	function stopFollowingRocket() {
+		if (cameraScrollBehavior === null) return;
+		document.documentElement.style.scrollBehavior = cameraScrollBehavior;
+		cameraScrollBehavior = null;
 	}
 
 	function centerStoryNode(index: number, behavior: ScrollBehavior) {
@@ -139,6 +154,7 @@
 		const scaleY = canvasRect.height / STORY_MAP_HEIGHT;
 		const angleProbe = Math.max(2, pathLength * 0.003);
 		const startedAt = performance.now();
+		if (followCamera) startFollowingRocket();
 		const move = (now: number) => {
 			const progress = Math.min(1, (now - startedAt) / duration);
 			const distance = pathLength * progress;
@@ -149,10 +165,15 @@
 			rocketMotionPoint = { x: point.x, y: point.y, angle };
 			if (followCamera) {
 				const rocketPageY = canvasPageTop + (point.y / STORY_MAP_HEIGHT) * canvasRect.height;
-				window.scrollTo({ top: Math.max(0, rocketPageY - window.innerHeight * 0.5), behavior: 'auto' });
+				const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+				window.scrollTo({ top: Math.max(0, rocketPageY - viewportHeight * 0.5), behavior: 'auto' });
 			}
-			if (progress < 1) motionFrame = window.requestAnimationFrame(move);
-			else motionFrame = undefined;
+			if (progress < 1) {
+				motionFrame = window.requestAnimationFrame(move);
+			} else {
+				motionFrame = undefined;
+				stopFollowingRocket();
+			}
 		};
 		move(startedAt);
 	}
@@ -224,6 +245,7 @@
 			window.setTimeout(() => {
 				if (motionFrame !== undefined) window.cancelAnimationFrame(motionFrame);
 				motionFrame = undefined;
+				stopFollowingRocket();
 				rocketMotionPoint = {
 					x: destination.x,
 					y: destination.y,

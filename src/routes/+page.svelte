@@ -288,6 +288,12 @@
 		battleDialogueComplete = false;
 	}
 
+	function getBossHitTaunt() {
+		const taunts = activeStoryBoss?.hitTaunts ?? ['Drat! You got me that time.'];
+		const hitIndex = Math.max(0, ALIEN_MAX_HEALTH - alienHealth - 1);
+		return taunts[hitIndex % taunts.length];
+	}
+
 	function completeBattleDialogue() {
 		battleDialogueComplete = true;
 		if (pendingChallengeTransition) {
@@ -486,6 +492,16 @@
 		feedbackTimer = undefined;
 	}
 
+	function showSessionFromTop() {
+		const root = document.documentElement;
+		const previousScrollBehavior = root.style.scrollBehavior;
+		root.style.scrollBehavior = 'auto';
+		window.scrollTo({ top: 0, behavior: 'auto' });
+		window.requestAnimationFrame(() => {
+			if (root.style.scrollBehavior === 'auto') root.style.scrollBehavior = previousScrollBehavior;
+		});
+	}
+
 	function startQuiz(table: number) {
 		startCustomQuiz([table], selectedDifficulty);
 	}
@@ -533,7 +549,7 @@
 		challengeAction = 'idle';
 		switchMusicForMode('quiz');
 		mode = 'quiz';
-		window.scrollTo({ top: 0, behavior: 'smooth' });
+		showSessionFromTop();
 		focusQuizQuestion();
 	}
 
@@ -591,7 +607,7 @@
 			}
 			void playMusicForMode('challenge');
 		}
-		window.scrollTo({ top: 0, behavior: 'smooth' });
+		showSessionFromTop();
 	}
 
 	function beginChallengeBattle() {
@@ -704,10 +720,7 @@
 			challengeOutcome = nextBattle.outcome;
 			challengeAction = 'hit';
 			challengeActionId += 1;
-			setBattleDialogue(
-				'MISSION CONTROL',
-				isVictory ? `${bossName}'s shield is down. The guardian is retreating!` : `Direct hit. ${nextBattle.alienHealth} shield ${nextBattle.alienHealth === 1 ? 'cell remains' : 'cells remain'}.`
-			);
+			setBattleDialogue('MISSION CONTROL', 'Direct hit!');
 			if (firstWrongAttempt) {
 				score += 1;
 				streak += 1;
@@ -763,7 +776,7 @@
 
 	function focusHardInput() {
 		if (sessionDifficulty !== 'hard') return;
-		void tick().then(() => hardInput?.focus());
+		void tick().then(() => hardInput?.focus({ preventScroll: true }));
 	}
 
 	function focusChallengeCommand() {
@@ -779,7 +792,7 @@
 			focusHardInput();
 			return;
 		}
-		void tick().then(() => document.querySelector<HTMLElement>('.quiz-stage .equation')?.focus());
+		void tick().then(() => document.querySelector<HTMLElement>('.quiz-stage .equation')?.focus({ preventScroll: true }));
 	}
 
 	function nextQuestion() {
@@ -814,10 +827,7 @@
 		challengeAnimating = false;
 		pendingChallengeTransition = null;
 		challengeAction = 'idle';
-		setBattleDialogue(
-			'MISSION CONTROL',
-			`Next calculation: ${currentQuestion.table} × ${currentQuestion.multiplier}. ${sessionDifficulty === 'hard' ? 'Type your attack.' : 'Choose your attack.'}`
-		);
+		setBattleDialogue(bossName, getBossHitTaunt());
 	}
 
 	function finishQuiz() {

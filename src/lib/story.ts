@@ -40,6 +40,7 @@ export type StoryBossNode = {
 	rank: string;
 	tables: readonly number[];
 	intro: string;
+	hitTaunts: readonly string[];
 	color: string;
 	x: number;
 	y: number;
@@ -65,28 +66,60 @@ export const STORY_NODES: StoryNode[] = [
 	{ id: 'planet-3', kind: 'planet', table: 3, title: 'Tri-Star', chapter: 'Triple system', color: '#ffd45a', x: 785, y: 140 },
 	{
 		id: 'boss-1', kind: 'boss', bossNumber: 1, bossName: 'Scout Zorp-9', rank: 'Sector gate', tables: [1, 2, 3],
-		intro: 'You cleared three planets, cadet. Now solve all three tables while I return fire!', color: '#8d75ff', x: 855, y: 410
+		intro: 'You cleared three planets, cadet. Now solve all three tables while I return fire!',
+		hitTaunts: [
+			'Drat! You tagged my shields.',
+			'A lucky shot. You will not land another.',
+			'My scanner says that was impossible!',
+			'Stop calculating so quickly!',
+			'You got me again? This is getting embarrassing.'
+		],
+		color: '#8d75ff', x: 855, y: 410
 	},
 	{ id: 'planet-4', kind: 'planet', table: 4, title: 'Quadrant Cove', chapter: 'Outer square', color: '#ff6262', x: 620, y: 550 },
 	{ id: 'planet-5', kind: 'planet', table: 5, title: 'High-Five Haven', chapter: 'Five-star port', color: '#d6f247', x: 300, y: 480 },
 	{ id: 'planet-6', kind: 'planet', table: 6, title: 'Hexa Harbor', chapter: 'Six-ring station', color: '#a7dded', x: 145, y: 710 },
 	{
 		id: 'boss-2', kind: 'boss', bossNumber: 2, bossName: 'Captain Vexa', rank: 'Nebula guard', tables: [4, 5, 6],
-		intro: 'Zorp warned me about you. Let us see how well you can mix tables four, five, and six.', color: '#ff6262', x: 330, y: 875
+		intro: 'Zorp warned me about you. Let us see how well you can mix tables four, five, and six.',
+		hitTaunts: [
+			'A clean hit. Do not get comfortable.',
+			'My shields can take more than that.',
+			'You are sharper than Zorp warned me.',
+			'Enough. My next volley will end this.',
+			'One shield left? Impossible.'
+		],
+		color: '#ff6262', x: 330, y: 875
 	},
 	{ id: 'planet-7', kind: 'planet', table: 7, title: 'Lucky Nova', chapter: 'Seven-star drift', color: '#ffd45a', x: 655, y: 805 },
 	{ id: 'planet-8', kind: 'planet', table: 8, title: 'Octo Orbit', chapter: 'Eight moon loop', color: '#8d75ff', x: 850, y: 1030 },
 	{ id: 'planet-9', kind: 'planet', table: 9, title: 'Cloud Nine', chapter: 'Nine-light cloud', color: '#d6f247', x: 595, y: 1165 },
 	{
 		id: 'boss-3', kind: 'boss', bossNumber: 3, bossName: 'Admiral Quasar', rank: 'Rift commander', tables: [7, 8, 9],
-		intro: 'This rift opens only for a true navigator. Survive a mixed volley from tables seven through nine.', color: '#a7dded', x: 250, y: 1085
+		intro: 'This rift opens only for a true navigator. Survive a mixed volley from tables seven through nine.',
+		hitTaunts: [
+			'A minor disturbance in the rift.',
+			'Your aim improves, navigator.',
+			'You bend numbers well, but not fate.',
+			'The rift answers to me, not you.',
+			'My command shield is failing. How?'
+		],
+		color: '#a7dded', x: 250, y: 1085
 	},
 	{ id: 'planet-10', kind: 'planet', table: 10, title: 'Deca Station', chapter: 'Ten-count relay', color: '#ff6262', x: 130, y: 1340 },
 	{ id: 'planet-11', kind: 'planet', table: 11, title: 'Prime Rift', chapter: 'Twin-digit frontier', color: '#a7dded', x: 425, y: 1480 },
 	{ id: 'planet-12', kind: 'planet', table: 12, title: 'Dozen Dawn', chapter: 'Final planet', color: '#ffd45a', x: 750, y: 1390 },
 	{
 		id: 'boss-4', kind: 'boss', bossNumber: 4, bossName: 'Emperor Null', rank: 'Final guardian', tables: [10, 11, 12],
-		intro: 'No pilot has crossed the final gate. Combine tables ten, eleven, and twelve, or turn back now.', color: '#8d75ff', x: 835, y: 1650
+		intro: 'No pilot has crossed the final gate. Combine tables ten, eleven, and twelve, or turn back now.',
+		hitTaunts: [
+			'You dare strike the imperial hull?',
+			'That shot changes nothing.',
+			'No pilot has pushed me this far.',
+			'I will erase your flight path.',
+			'The final shield cannot fall!'
+		],
+		color: '#8d75ff', x: 835, y: 1650
 	}
 ];
 

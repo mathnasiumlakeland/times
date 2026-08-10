@@ -22,6 +22,7 @@ describe('story route', () => {
 		[7, 8, 9],
 		[10, 11, 12]
 		]);
+		expect(STORY_NODES.filter((node) => node.kind === 'boss').every((node) => node.hitTaunts.length >= 5)).toBe(true);
 	});
 
 	it('routes travel through every intermediate story stop in either direction', () => {
