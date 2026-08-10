@@ -52,6 +52,21 @@ export function createSilentWavBuffer() {
 	return buffer;
 }
 
+export function getPausedPlaybackPosition(
+	playbackOffset: number,
+	playbackBeganAt: number,
+	currentTime: number,
+	duration: number
+) {
+	if (!Number.isFinite(duration) || duration <= 0) return 0;
+	if (!Number.isFinite(playbackOffset)) playbackOffset = 0;
+	const elapsed = Number.isFinite(currentTime) && Number.isFinite(playbackBeganAt)
+		? Math.max(0, currentTime - playbackBeganAt)
+		: 0;
+	const position = playbackOffset + elapsed;
+	return ((position % duration) + duration) % duration;
+}
+
 function readUint32(bytes: Uint8Array, offset: number) {
 	return (bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3];
 }
@@ -165,8 +180,12 @@ export class MidiPlayer {
 	private iosMediaBridge?: HTMLAudioElement;
 	private iosMediaBridgeUrl?: string;
 	private playbackStartedAt = 0;
+	private playbackBeganAt = 0;
+	private playbackOffset = 0;
 	private loopNumber = 0;
 	private nextNoteIndex = 0;
+	private playing = false;
+	private playbackRequestId = 0;
 
 	constructor(private readonly volume = 1) {}
 
@@ -185,12 +204,36 @@ export class MidiPlayer {
 
 	async play() {
 		if (!this.music) throw new Error('Music has not loaded yet.');
-		this.stop();
+		if (this.playing) return;
+		const requestId = ++this.playbackRequestId;
 		await this.unlock();
+		if (requestId !== this.playbackRequestId || this.playing) return;
 		this.scheduleLoop();
 	}
 
+	pause() {
+		this.playbackRequestId += 1;
+		if (this.playing && this.context && this.music) {
+			this.playbackOffset = getPausedPlaybackPosition(
+				this.playbackOffset,
+				this.playbackBeganAt,
+				this.context.currentTime,
+				this.music.duration
+			);
+		}
+		this.clearScheduledPlayback();
+	}
+
 	stop() {
+		this.pause();
+		this.playbackOffset = 0;
+	}
+
+	get isPlaying() {
+		return this.playing;
+	}
+
+	private clearScheduledPlayback() {
 		if (this.timer !== undefined) window.clearInterval(this.timer);
 		this.timer = undefined;
 		for (const source of this.sources) {
@@ -202,7 +245,9 @@ export class MidiPlayer {
 		}
 		this.sources.clear();
 		this.iosMediaBridge?.pause();
+		this.playing = false;
 		this.playbackStartedAt = 0;
+		this.playbackBeganAt = 0;
 		this.loopNumber = 0;
 		this.nextNoteIndex = 0;
 	}
@@ -243,11 +288,26 @@ export class MidiPlayer {
 
 	private scheduleLoop() {
 		if (!this.context || !this.music) return;
-		this.playbackStartedAt = this.context.currentTime + 0.06;
+		this.playbackOffset = getPausedPlaybackPosition(this.playbackOffset, 0, 0, this.music.duration);
+		this.playbackBeganAt = this.context.currentTime + 0.06;
+		this.playbackStartedAt = this.playbackBeganAt - this.playbackOffset;
 		this.loopNumber = 0;
-		this.nextNoteIndex = 0;
+		this.nextNoteIndex = this.firstNoteIndexAtOrAfter(Math.max(0, this.playbackOffset - 0.04));
+		this.playing = true;
 		this.scheduleUpcomingNotes();
 		this.timer = window.setInterval(() => this.scheduleUpcomingNotes(), 100);
+	}
+
+	private firstNoteIndexAtOrAfter(position: number) {
+		if (!this.music) return 0;
+		let low = 0;
+		let high = this.music.notes.length;
+		while (low < high) {
+			const middle = Math.floor((low + high) / 2);
+			if (this.music.notes[middle].start < position) low = middle + 1;
+			else high = middle;
+		}
+		return low;
 	}
 
 	private scheduleUpcomingNotes() {

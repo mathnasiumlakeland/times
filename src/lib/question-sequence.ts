@@ -3,6 +3,16 @@ export type MultiplicationQuestion = {
 	multiplier: number;
 };
 
+export function getQuestionProgressPercent(
+	questionIndex: number,
+	totalQuestions: number,
+	currentQuestionComplete: boolean
+) {
+	if (!Number.isFinite(totalQuestions) || totalQuestions <= 0) return 0;
+	const completedQuestions = questionIndex + (currentQuestionComplete ? 1 : 0);
+	return Math.max(0, Math.min(100, (completedQuestions / totalQuestions) * 100));
+}
+
 export function makeQuestionSequence(
 	tableSequence: number[],
 	random: () => number = Math.random

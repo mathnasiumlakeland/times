@@ -12,7 +12,6 @@
 		Keyboard,
 		Lightbulb,
 		LockKeyhole,
-		Medal,
 		Music,
 		MousePointer2,
 		Crown,
@@ -31,6 +30,7 @@
 	} from 'lucide-svelte';
 	import AlienBattleScene from '$lib/components/game/AlienBattleScene.svelte';
 	import BattleDialogue from '$lib/components/game/BattleDialogue.svelte';
+	import NumberedMedal from '$lib/components/game/NumberedMedal.svelte';
 	import StoryMap from '$lib/components/game/StoryMap.svelte';
 	import Button from '$lib/components/ui/button/Button.svelte';
 	import { BattleAudio } from '$lib/battle-audio';
@@ -46,7 +46,7 @@
 	import { makeEmptyGameProgress, normalizeGameProgress, type GameProgress } from '$lib/game-progress';
 	import { MidiPlayer } from '$lib/midi-player';
 	import { makePracticeExample, type PracticeExample } from '$lib/practice-strategies';
-	import { makeQuestionSequence, type MultiplicationQuestion } from '$lib/question-sequence';
+	import { getQuestionProgressPercent, makeQuestionSequence, type MultiplicationQuestion } from '$lib/question-sequence';
 	import {
 		STORY_NODES,
 		getStoryProgress,
@@ -173,7 +173,7 @@
 
 	let currentQuestion = $derived(questions[questionIndex] ?? { table: activeTable, multiplier: 1 });
 	let correctAnswer = $derived(currentQuestion.table * currentQuestion.multiplier);
-	let progressPercent = $derived((questionIndex / totalQuestions) * 100);
+	let progressPercent = $derived(getQuestionProgressPercent(questionIndex, totalQuestions, feedback === 'correct'));
 	let answerOptions = $derived.by(() => makeOptions(correctAnswer, currentQuestion.table));
 	let earnedStars = $derived(score >= 9 ? 3 : score >= 7 ? 2 : score >= 5 ? 1 : 0);
 	let accuracy = $derived(Math.round((score / totalQuestions) * 100));
@@ -307,9 +307,9 @@
 		return requested === 'boss' ? 'regular' : 'boss';
 	}
 
-	function stopMusic() {
-		regularMusicPlayer?.stop();
-		bossMusicPlayer?.stop();
+	function pauseMusic() {
+		regularMusicPlayer?.pause();
+		bossMusicPlayer?.pause();
 	}
 
 	async function playMusicForMode(targetMode: GameMode) {
@@ -323,17 +323,18 @@
 			musicStatus = 'unavailable';
 			return;
 		}
+		if (musicStatus === 'playing' && currentMusicKind === nextMusicKind && player.isPlaying) return;
 
 		const playbackId = ++musicPlaybackId;
 		pendingMusicMode = null;
 		currentMusicKind = nextMusicKind;
 		// Treat a user-approved AudioContext resume as active so a mode change can supersede it.
 		musicStatus = 'playing';
-		stopMusic();
+		pauseMusic();
 		try {
 			await player.play();
 			if (playbackId !== musicPlaybackId) {
-				player.stop();
+				player.pause();
 				return;
 			}
 			musicStatus = 'playing';
@@ -357,7 +358,7 @@
 			musicMutedByUser = true;
 			pendingMusicMode = null;
 			musicPlaybackId += 1;
-			stopMusic();
+			pauseMusic();
 			musicStatus = 'off';
 			return;
 		}
@@ -1169,8 +1170,7 @@
 								<Crown size={31} strokeWidth={2.2} />
 								<span>{table}</span>
 							{:else if progress.completed.includes(table)}
-								<Medal size={30} strokeWidth={2.2} />
-								<span>{table}</span>
+								<NumberedMedal number={table} size={30} strokeWidth={2.2} />
 							{:else}
 								<LockKeyhole size={22} />
 							{/if}
@@ -1201,7 +1201,17 @@
 			{:else}
 				<div class="game-progress-wrap">
 					<div class="game-label"><span>{sessionLabel}</span><span>{questionIndex + 1} of {totalQuestions}</span></div>
-					<div class="game-progress"><span style:width={`${progressPercent}%`}></span></div>
+					<div
+						class="game-progress"
+						class:complete={progressPercent === 100}
+						role="progressbar"
+						aria-label="Mission progress"
+						aria-valuemin="0"
+						aria-valuemax="100"
+						aria-valuenow={progressPercent}
+					>
+						<span style:width={`${progressPercent}%`}></span>
+					</div>
 				</div>
 				<div class="streak-meter" class:hot={streak >= 3}><Flame size={18} fill={streak >= 3 ? 'currentColor' : 'none'} /><strong>{streak}</strong></div>
 			{/if}
@@ -1461,7 +1471,11 @@
 				{#if earnedStars === 0}
 					<RotateCcw size={42} />
 				{:else if isSingleTable}
-					{#if sessionOrigin === 'free-play' && sessionDifficulty === 'hard'}<Crown size={48} strokeWidth={1.9} />{:else}<Medal size={48} strokeWidth={1.8} />{/if}<strong>{sessionTables[0]}</strong>
+					{#if sessionOrigin === 'free-play' && sessionDifficulty === 'hard'}
+						<Crown size={48} strokeWidth={1.9} /><strong>{sessionTables[0]}</strong>
+					{:else}
+						<NumberedMedal number={sessionTables[0]} size={48} strokeWidth={1.8} />
+					{/if}
 				{:else}
 					<Target size={44} strokeWidth={2} />
 				{/if}
