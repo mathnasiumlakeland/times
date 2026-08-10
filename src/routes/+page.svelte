@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
+	import type { Attachment } from 'svelte/attachments';
 	import { SvelteSet } from 'svelte/reactivity';
 	import {
 		ArrowLeft,
@@ -49,7 +50,9 @@
 	import { getQuestionProgressPercent, makeQuestionSequence, type MultiplicationQuestion } from '$lib/question-sequence';
 	import {
 		STORY_NODES,
+		STORY_TRAVEL_TIMING,
 		getStoryProgress,
+		getStoryTravelFlightMs,
 		recordStoryResult,
 		type StoryBossNode,
 		type StoryNode,
@@ -124,6 +127,7 @@
 	let progress = $state<GameProgress>(makeEmptyGameProgress());
 	let activeStoryNodeId = $state<string | null>(null);
 	let storyTravel = $state<StoryTravel | null>(null);
+	let storyRocketIndex = $state(0);
 	let storyTravelId = 0;
 	let alienHealth = $state(ALIEN_MAX_HEALTH);
 	let playerShields = $state(PLAYER_MAX_SHIELDS);
@@ -148,6 +152,12 @@
 	let musicMutedByUser = false;
 	let pendingMusicMode: GameMode | null = null;
 	let musicStatus = $state<'off' | 'loading' | 'playing' | 'unavailable'>('loading');
+	const captureHardInput: Attachment<HTMLInputElement> = (element) => {
+		hardInput = element;
+		return () => {
+			if (hardInput === element) hardInput = undefined;
+		};
+	};
 
 	function loadSavedProgress() {
 		try {
@@ -244,7 +254,10 @@
 		}
 
 		const savedProgress = loadSavedProgress();
-		if (savedProgress) progress = savedProgress;
+		if (savedProgress) {
+			progress = savedProgress;
+			storyRocketIndex = getStoryProgress(savedProgress.story).currentIndex;
+		}
 
 		return () => {
 			if (feedbackTimer !== undefined) window.clearTimeout(feedbackTimer);
@@ -522,6 +535,26 @@
 		mode = 'quiz';
 		window.scrollTo({ top: 0, behavior: 'smooth' });
 		focusQuizQuestion();
+	}
+
+	function playStoryMapTravel(nextTravel: StoryTravel) {
+		const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+		battleAudio?.playStoryTravel({
+			reducedMotion,
+			flightMs: getStoryTravelFlightMs(nextTravel.fromIndex, nextTravel.toIndex),
+			ignitionDelayMs: reducedMotion
+				? 0
+				: nextTravel.reason === 'selection'
+				? STORY_TRAVEL_TIMING.selectionCameraMs
+				: STORY_TRAVEL_TIMING.ignitionDelayMs
+		});
+	}
+
+	function completeStoryMapTravel(completedTravel: StoryTravel) {
+		storyRocketIndex = completedTravel.toIndex;
+		if (completedTravel.reason === 'progression' && storyTravel?.id === completedTravel.id) {
+			storyTravel = null;
+		}
 	}
 
 	function startChallenge(boss: StoryBossNode) {
@@ -815,7 +848,7 @@
 				const story = recordStoryResult(progress.story, activeStoryNodeId, finalScore, isCompleted);
 				if (story.completedNodeIds.length > previousCount && previousCount < STORY_NODES.length - 1) {
 					storyTravelId += 1;
-					storyTravel = { id: storyTravelId, fromIndex: previousCount, toIndex: previousCount + 1 };
+					storyTravel = { id: storyTravelId, fromIndex: previousCount, toIndex: previousCount + 1, reason: 'progression' };
 				}
 				progress = { ...progress, story };
 			}
@@ -835,7 +868,7 @@
 			: progress.story;
 		if (story.completedNodeIds.length > previousCount && previousCount < STORY_NODES.length - 1) {
 			storyTravelId += 1;
-			storyTravel = { id: storyTravelId, fromIndex: previousCount, toIndex: previousCount + 1 };
+			storyTravel = { id: storyTravelId, fromIndex: previousCount, toIndex: previousCount + 1, reason: 'progression' };
 		}
 		progress = {
 			...progress,
@@ -859,9 +892,10 @@
 	}
 
 	function goHome() {
-		const hasTravelAnimation = sessionOrigin === 'story' && storyTravel !== null;
-		if (hasTravelAnimation) {
-			battleAudio?.playStoryTravel(window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+		const pendingStoryTravel = sessionOrigin === 'story' ? storyTravel : null;
+		const hasTravelAnimation = pendingStoryTravel !== null;
+		if (pendingStoryTravel) {
+			playStoryMapTravel(pendingStoryTravel);
 		}
 		if (feedbackTimer !== undefined) window.clearTimeout(feedbackTimer);
 		feedbackTimer = undefined;
@@ -1056,10 +1090,12 @@
 			<StoryMap
 				progress={progress.story}
 				travel={storyTravel}
+				rocketIndex={storyRocketIndex}
 				difficulty={storyDifficulty}
 				onselect={startStoryNode}
 				ondifficultychange={(difficulty) => storyDifficulty = difficulty}
-				ontravelcomplete={() => storyTravel = null}
+				ontravelstart={playStoryMapTravel}
+				ontravelcomplete={completeStoryMapTravel}
 			/>
 		{:else}
 		<section class="mission-section" id="free-play-missions">
@@ -1330,7 +1366,7 @@
 												type="number"
 												inputmode="numeric"
 												bind:value={typedAnswer}
-												bind:this={hardInput}
+												{@attach captureHardInput}
 												oninput={handleHardInput}
 												onkeydown={handleHardKeydown}
 												disabled={!battleDialogueComplete || challengeAnimating || feedback === 'correct' || challengeEnding}
@@ -1400,7 +1436,7 @@
 								type="number"
 								inputmode="numeric"
 								bind:value={typedAnswer}
-								bind:this={hardInput}
+								{@attach captureHardInput}
 								oninput={handleHardInput}
 								onkeydown={handleHardKeydown}
 								disabled={feedback === 'correct'}

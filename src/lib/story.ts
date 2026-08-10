@@ -3,9 +3,13 @@ export const STORY_MAP_WIDTH = 1000;
 export const STORY_MAP_HEIGHT = 1770;
 export const STORY_TRAVEL_TIMING = {
 	ignitionDelayMs: 120,
+	selectionCameraMs: 520,
 	ignitionMs: 560,
 	flightMs: 1450,
-	arrivalMs: 260
+	additionalHopMs: 320,
+	maxFlightMs: 4200,
+	arrivalMs: 260,
+	selectionLandingHoldMs: 180
 } as const;
 
 export type StoryNodeStatus = 'completed' | 'current' | 'locked';
@@ -14,6 +18,7 @@ export type StoryTravel = {
 	id: number;
 	fromIndex: number;
 	toIndex: number;
+	reason: 'progression' | 'selection';
 };
 
 export type StoryPlanetNode = {
@@ -172,5 +177,20 @@ export function makeStoryPath(nodes: readonly StoryNode[] = STORY_NODES) {
 export function getStoryTravelPath(fromIndex: number, toIndex: number) {
 	const from = STORY_NODES[fromIndex];
 	const to = STORY_NODES[toIndex];
-	return from && to ? makeStoryPath([from, to]) : '';
+	if (!from || !to || fromIndex === toIndex) return '';
+	const direction = fromIndex < toIndex ? 1 : -1;
+	const travelNodes: StoryNode[] = [];
+	for (let index = fromIndex; index !== toIndex + direction; index += direction) {
+		travelNodes.push(STORY_NODES[index]);
+	}
+	return makeStoryPath(travelNodes);
+}
+
+export function getStoryTravelFlightMs(fromIndex: number, toIndex: number) {
+	if (!STORY_NODES[fromIndex] || !STORY_NODES[toIndex] || fromIndex === toIndex) return 0;
+	const hopCount = Math.abs(toIndex - fromIndex);
+	return Math.min(
+		STORY_TRAVEL_TIMING.maxFlightMs,
+		STORY_TRAVEL_TIMING.flightMs + Math.max(0, hopCount - 1) * STORY_TRAVEL_TIMING.additionalHopMs
+	);
 }

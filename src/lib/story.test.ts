@@ -2,8 +2,11 @@ import { describe, expect, it } from 'bun:test';
 import {
 	EMPTY_STORY_PROGRESS,
 	STORY_NODES,
+	STORY_TRAVEL_TIMING,
 	getStoryNodeStatus,
 	getStoryProgress,
+	getStoryTravelFlightMs,
+	getStoryTravelPath,
 	normalizeStoryProgress,
 	recordStoryResult
 } from './story';
@@ -19,6 +22,25 @@ describe('story route', () => {
 		[7, 8, 9],
 		[10, 11, 12]
 		]);
+	});
+
+	it('routes travel through every intermediate story stop in either direction', () => {
+		const forwardPath = getStoryTravelPath(0, 3);
+		const reversePath = getStoryTravelPath(3, 0);
+
+		expect(forwardPath.startsWith(`M ${STORY_NODES[0].x} ${STORY_NODES[0].y}`)).toBe(true);
+		expect(forwardPath.endsWith(`${STORY_NODES[3].x} ${STORY_NODES[3].y}`)).toBe(true);
+		expect(forwardPath.match(/ C /g)).toHaveLength(3);
+		expect(reversePath.startsWith(`M ${STORY_NODES[3].x} ${STORY_NODES[3].y}`)).toBe(true);
+		expect(reversePath.endsWith(`${STORY_NODES[0].x} ${STORY_NODES[0].y}`)).toBe(true);
+		expect(reversePath.match(/ C /g)).toHaveLength(3);
+	});
+
+	it('gives multi-stop journeys more flight time without making them unbounded', () => {
+		expect(getStoryTravelFlightMs(0, 1)).toBe(STORY_TRAVEL_TIMING.flightMs);
+		expect(getStoryTravelFlightMs(0, 4)).toBeGreaterThan(STORY_TRAVEL_TIMING.flightMs);
+		expect(getStoryTravelFlightMs(0, STORY_NODES.length - 1)).toBe(STORY_TRAVEL_TIMING.maxFlightMs);
+		expect(getStoryTravelFlightMs(2, 2)).toBe(0);
 	});
 
 	it('unlocks only the first incomplete node', () => {

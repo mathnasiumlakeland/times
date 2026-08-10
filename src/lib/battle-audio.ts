@@ -23,6 +23,12 @@ type ToneOptions = {
 	detune?: number;
 };
 
+type StoryTravelAudioOptions = {
+	reducedMotion?: boolean;
+	flightMs?: number;
+	ignitionDelayMs?: number;
+};
+
 const SILENCE = 0.0001;
 const IMPACT_DELAY_SECONDS = 0.32;
 
@@ -30,7 +36,7 @@ const IMPACT_DELAY_SECONDS = 0.32;
  * Procedural Web Audio effects for Story Mode battles and map travel.
  *
  * Boss encounters call `unlock()` from their entry gesture. Story travel starts
- * from the Continue gesture, so every layered effect shares the same AudioContext.
+ * from a Continue or map-selection gesture, so every layered effect shares the same AudioContext.
  */
 export class BattleAudio {
 	private context?: AudioContext;
@@ -102,8 +108,12 @@ export class BattleAudio {
 		}
 	}
 
-	playStoryTravel(reducedMotion = false) {
-		const ignitionAt = this.startTime(STORY_TRAVEL_TIMING.ignitionDelayMs / 1000);
+	playStoryTravel({
+		reducedMotion = false,
+		flightMs = STORY_TRAVEL_TIMING.flightMs,
+		ignitionDelayMs = STORY_TRAVEL_TIMING.ignitionDelayMs
+	}: StoryTravelAudioOptions = {}) {
+		const ignitionAt = this.startTime(ignitionDelayMs / 1000);
 		if (ignitionAt === undefined) return;
 
 		if (reducedMotion) {
@@ -112,7 +122,8 @@ export class BattleAudio {
 		}
 
 		const flightAt = ignitionAt + STORY_TRAVEL_TIMING.ignitionMs / 1000;
-		const arrivalAt = flightAt + STORY_TRAVEL_TIMING.flightMs / 1000;
+		const flightSeconds = Math.max(0.1, flightMs / 1000);
+		const arrivalAt = flightAt + flightSeconds;
 
 		this.tone(ignitionAt, {
 			duration: STORY_TRAVEL_TIMING.ignitionMs / 1000,
@@ -139,22 +150,22 @@ export class BattleAudio {
 			attack: 0.01
 		});
 		this.noise(flightAt, {
-			duration: 0.96,
+			duration: flightSeconds,
 			peak: 0.1,
 			filterType: 'bandpass',
 			filterStart: 520,
 			filterEnd: 1650,
 			attack: 0.025
 		});
-		this.noise(flightAt + 0.72, {
-			duration: 0.73,
+		this.noise(flightAt + flightSeconds * 0.52, {
+			duration: Math.max(0.18, flightSeconds * 0.48),
 			peak: 0.07,
 			filterType: 'highpass',
 			filterStart: 520,
 			filterEnd: 1420,
 			attack: 0.03
 		});
-		for (const pulse of [0.2, 0.58, 0.96]) {
+		for (let pulse = 0.2; pulse < flightSeconds; pulse += 0.4) {
 			this.tone(flightAt + pulse, {
 				duration: 0.23,
 				frequencyStart: 104,
@@ -444,6 +455,7 @@ export class BattleAudio {
 		const endsAt = startAt + options.duration;
 		const attackEndsAt = Math.min(endsAt - 0.001, startAt + (options.attack ?? 0.005));
 		source.buffer = this.getNoiseBuffer(context);
+		source.loop = options.duration > source.buffer.duration;
 		filter.type = options.filterType;
 		filter.Q.value = options.filterType === 'bandpass' ? 1.2 : 0.72;
 		filter.frequency.setValueAtTime(Math.max(20, options.filterStart), startAt);

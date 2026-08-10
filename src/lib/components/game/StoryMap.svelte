@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
+	import type { Attachment } from 'svelte/attachments';
 	import { Check, Keyboard, LockKeyhole, MousePointer2, Rocket, Swords } from 'lucide-svelte';
 	import {
 		STORY_MAP_HEIGHT,
@@ -7,6 +8,7 @@
 		STORY_NODES,
 		getStoryNodeStatus,
 		getStoryProgress,
+		getStoryTravelFlightMs,
 		getStoryTravelPath,
 		makeStoryPath,
 		STORY_TRAVEL_TIMING,
@@ -18,58 +20,60 @@
 	let {
 		progress,
 		travel = null,
+		rocketIndex,
 		difficulty,
 		onselect,
 		ondifficultychange,
+		ontravelstart = () => {},
 		ontravelcomplete = () => {}
 	}: {
 		progress: StoryProgress;
 		travel?: StoryTravel | null;
+		rocketIndex: number;
 		difficulty: 'easy' | 'hard';
 		onselect: (node: StoryNode) => void;
 		ondifficultychange: (difficulty: 'easy' | 'hard') => void;
-		ontravelcomplete?: () => void;
+		ontravelstart?: (travel: StoryTravel) => void;
+		ontravelcomplete?: (travel: StoryTravel) => void;
 	} = $props();
 
 	type TravelPhase = 'idle' | 'waiting' | 'ignition' | 'flight' | 'arrival';
 
-	let arriving = $state(false);
+	let travelling = $state(false);
 	let arrivalAnnouncement = $state('');
 	let travelPhase = $state<TravelPhase>('idle');
+	let activeTravel = $state<StoryTravel | null>(null);
+	let selectionTravelId = 0;
+	let travelTimers: number[] = [];
+	let cameraFrame: number | undefined;
+	let mapCanvas = $state<HTMLOListElement>();
+	let travelMotionGuide = $state<SVGPathElement>();
 	let routeProgress = $derived(getStoryProgress(progress));
 	let currentNode = $derived(STORY_NODES[routeProgress.currentIndex]);
-	let travelStartNode = $derived(travel ? STORY_NODES[travel.fromIndex] : undefined);
-	let travelEndNode = $derived(travel ? STORY_NODES[travel.toIndex] : undefined);
+	let resolvedRocketIndex = $derived(STORY_NODES[rocketIndex] ? rocketIndex : routeProgress.currentIndex);
+	let rocketNode = $derived(STORY_NODES[resolvedRocketIndex]);
+	let travelStartNode = $derived(activeTravel ? STORY_NODES[activeTravel.fromIndex] : undefined);
+	let travelEndNode = $derived(activeTravel ? STORY_NODES[activeTravel.toIndex] : undefined);
 	let fullPath = makeStoryPath();
 	let completedPath = $derived(makeStoryPath(STORY_NODES.slice(0, routeProgress.currentIndex + 1)));
-	let travelPath = $derived(travel ? getStoryTravelPath(travel.fromIndex, travel.toIndex) : '');
+	let travelPath = $derived(activeTravel ? getStoryTravelPath(activeTravel.fromIndex, activeTravel.toIndex) : '');
+	let travelFlightMs = $derived(activeTravel ? getStoryTravelFlightMs(activeTravel.fromIndex, activeTravel.toIndex) : 0);
+	const captureMapCanvas: Attachment<HTMLOListElement> = (element) => {
+		mapCanvas = element;
+		return () => {
+			if (mapCanvas === element) mapCanvas = undefined;
+		};
+	};
+	const captureTravelGuide: Attachment<SVGPathElement> = (element) => {
+		travelMotionGuide = element;
+		return () => {
+			if (travelMotionGuide === element) travelMotionGuide = undefined;
+		};
+	};
 
 	onMount(() => {
-		if (!travel || !travelPath) return;
-		const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-		const finishArrival = () => {
-			travelPhase = 'idle';
-			arriving = false;
-			arrivalAnnouncement = `${nodeTitle(currentNode)} unlocked.`;
-			ontravelcomplete();
-			void tick().then(() => document.querySelector<HTMLButtonElement>(`#story-node-${currentNode.id}`)?.focus());
-		};
-		if (reduceMotion) {
-			finishArrival();
-			return;
-		}
-
-		arriving = true;
-		travelPhase = 'waiting';
-		const flightStartsAt = STORY_TRAVEL_TIMING.ignitionDelayMs + STORY_TRAVEL_TIMING.ignitionMs;
-		const arrivalStartsAt = flightStartsAt + STORY_TRAVEL_TIMING.flightMs;
-		const timers = [
-			window.setTimeout(() => travelPhase = 'ignition', STORY_TRAVEL_TIMING.ignitionDelayMs),
-			window.setTimeout(() => travelPhase = 'flight', flightStartsAt),
-			window.setTimeout(() => travelPhase = 'arrival', arrivalStartsAt),
-			window.setTimeout(finishArrival, arrivalStartsAt + STORY_TRAVEL_TIMING.arrivalMs)
-		];
-		return () => timers.forEach((timer) => window.clearTimeout(timer));
+		if (travel) beginTravel(travel);
+		return clearTravelTimers;
 	});
 
 	function nodeTitle(node: StoryNode) {
@@ -91,9 +95,109 @@
 		return `Stage ${index + 1}, ${nodeTitle(node)}, ${stateCopy}`;
 	}
 
+	function clearTravelTimers() {
+		for (const timer of travelTimers) window.clearTimeout(timer);
+		travelTimers = [];
+		if (cameraFrame !== undefined) window.cancelAnimationFrame(cameraFrame);
+		cameraFrame = undefined;
+	}
+
+	function centerStoryNode(index: number, behavior: ScrollBehavior) {
+		document.querySelector<HTMLButtonElement>(`#story-node-${STORY_NODES[index]?.id}`)
+			?.scrollIntoView({ behavior, block: 'center' });
+	}
+
+	function followTravelCamera(duration: number) {
+		const guide = travelMotionGuide;
+		const canvas = mapCanvas;
+		if (!guide || !canvas || duration <= 0) return;
+		const pathLength = guide.getTotalLength();
+		const startedAt = performance.now();
+		const follow = (now: number) => {
+			const progress = Math.min(1, (now - startedAt) / duration);
+			const point = guide.getPointAtLength(pathLength * progress);
+			const canvasRect = canvas.getBoundingClientRect();
+			const canvasTop = window.scrollY + canvasRect.top;
+			const rocketPageY = canvasTop + (point.y / STORY_MAP_HEIGHT) * canvasRect.height;
+			window.scrollTo({ top: Math.max(0, rocketPageY - window.innerHeight * 0.5), behavior: 'auto' });
+			if (progress < 1) cameraFrame = window.requestAnimationFrame(follow);
+			else cameraFrame = undefined;
+		};
+		cameraFrame = window.requestAnimationFrame(follow);
+	}
+
+	function finishTravel(completedTravel: StoryTravel, launchNode?: StoryNode) {
+		clearTravelTimers();
+		travelPhase = 'idle';
+		travelling = false;
+		activeTravel = null;
+		arrivalAnnouncement = launchNode
+			? `Arrived at ${nodeTitle(launchNode)}. Launching mission.`
+			: `${nodeTitle(STORY_NODES[completedTravel.toIndex])} unlocked.`;
+		ontravelcomplete(completedTravel);
+		if (launchNode) {
+			onselect(launchNode);
+			return;
+		}
+		void tick().then(() => document.querySelector<HTMLButtonElement>(`#story-node-${STORY_NODES[completedTravel.toIndex].id}`)?.focus());
+	}
+
+	function beginTravel(nextTravel: StoryTravel, launchNode?: StoryNode) {
+		const path = getStoryTravelPath(nextTravel.fromIndex, nextTravel.toIndex);
+		if (!path) {
+			finishTravel(nextTravel, launchNode);
+			return;
+		}
+		clearTravelTimers();
+		activeTravel = nextTravel;
+		travelling = true;
+		travelPhase = 'waiting';
+		const destination = STORY_NODES[nextTravel.toIndex];
+		arrivalAnnouncement = `Rocket traveling to ${nodeTitle(destination)}.`;
+		const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+		if (reduceMotion) {
+			centerStoryNode(nextTravel.toIndex, 'auto');
+			finishTravel(nextTravel, launchNode);
+			return;
+		}
+
+		const preflightMs = nextTravel.reason === 'selection'
+			? STORY_TRAVEL_TIMING.selectionCameraMs
+			: STORY_TRAVEL_TIMING.ignitionDelayMs;
+		const flightMs = getStoryTravelFlightMs(nextTravel.fromIndex, nextTravel.toIndex);
+		const flightStartsAt = preflightMs + STORY_TRAVEL_TIMING.ignitionMs;
+		const arrivalStartsAt = flightStartsAt + flightMs;
+		const landingHoldMs = nextTravel.reason === 'selection' ? STORY_TRAVEL_TIMING.selectionLandingHoldMs : 0;
+		if (nextTravel.reason === 'selection') centerStoryNode(nextTravel.fromIndex, 'smooth');
+		travelTimers = [
+			window.setTimeout(() => travelPhase = 'ignition', preflightMs),
+			window.setTimeout(() => {
+				travelPhase = 'flight';
+				if (nextTravel.reason === 'selection') void tick().then(() => followTravelCamera(flightMs));
+			}, flightStartsAt),
+			window.setTimeout(() => travelPhase = 'arrival', arrivalStartsAt),
+			window.setTimeout(
+				() => finishTravel(nextTravel, launchNode),
+				arrivalStartsAt + STORY_TRAVEL_TIMING.arrivalMs + landingHoldMs
+			)
+		];
+	}
+
 	function chooseNode(node: StoryNode, index: number) {
-		if (getStoryNodeStatus(index, progress) === 'locked') return;
-		onselect(node);
+		if (travelling || getStoryNodeStatus(index, progress) === 'locked') return;
+		if (index === resolvedRocketIndex) {
+			onselect(node);
+			return;
+		}
+		selectionTravelId += 1;
+		const selectionTravel: StoryTravel = {
+			id: -selectionTravelId,
+			fromIndex: resolvedRocketIndex,
+			toIndex: index,
+			reason: 'selection'
+		};
+		ontravelstart(selectionTravel);
+		beginTravel(selectionTravel, node);
 	}
 </script>
 
@@ -123,7 +227,7 @@
 		<h2 id="story-map-title">Chart a path through the tables.</h2>
 		<p>Clear one-table planets, then prove what you learned when an alien blocks the route.</p>
 
-		<fieldset class="story-difficulty">
+		<fieldset class="story-difficulty" disabled={travelling}>
 			<legend>Story difficulty</legend>
 			<div class="story-difficulty-switch">
 				<button
@@ -170,8 +274,8 @@
 		</div>
 	</div>
 
-	<nav class="story-route" id="story-route" aria-label="Story missions">
-		<ol class="story-map-canvas">
+	<nav class="story-route" id="story-route" aria-label="Story missions" aria-busy={travelling}>
+		<ol class="story-map-canvas" {@attach captureMapCanvas}>
 			<svg
 				class="story-route-lines"
 				viewBox={`0 0 ${STORY_MAP_WIDTH} ${STORY_MAP_HEIGHT}`}
@@ -189,6 +293,7 @@
 				{@const status = getStoryNodeStatus(index, progress)}
 				<li
 					class={['story-stop', `is-${status}`, `is-${node.kind}`]}
+					class:travel-target={travelling && activeTravel?.toIndex === index}
 					style:left={`${(node.x / STORY_MAP_WIDTH) * 100}%`}
 					style:top={`${(node.y / STORY_MAP_HEIGHT) * 100}%`}
 					style:--node-color={node.color}
@@ -197,6 +302,7 @@
 						id={`story-node-${node.id}`}
 						type="button"
 						onclick={() => chooseNode(node, index)}
+						disabled={travelling}
 						aria-disabled={status === 'locked'}
 						aria-current={status === 'current' ? 'step' : undefined}
 						aria-label={accessibleNodeLabel(node, index)}
@@ -229,20 +335,21 @@
 				</li>
 			{/each}
 
-			{#if arriving && travelPath}
+			{#if travelling && travelPath}
 				<svg
 					class="story-travel-layer"
 					viewBox={`0 0 ${STORY_MAP_WIDTH} ${STORY_MAP_HEIGHT}`}
 					preserveAspectRatio="none"
 					aria-hidden="true"
 				>
+					<path class="travel-motion-guide" d={travelPath} {@attach captureTravelGuide}></path>
 					{#if travelPhase === 'ignition' && travelStartNode}
 						<g transform={`translate(${travelStartNode.x} ${travelStartNode.y})`}>
 							{@render travelRocket('travel-ship-ignition')}
 						</g>
 					{:else if travelPhase === 'flight'}
 						<g class="travel-ship-flight">
-							<animateMotion dur={`${STORY_TRAVEL_TIMING.flightMs / 1000}s`} path={travelPath} rotate="0" fill="freeze"></animateMotion>
+							<animateMotion dur={`${travelFlightMs / 1000}s`} path={travelPath} rotate="auto" fill="freeze"></animateMotion>
 							{@render travelRocket('')}
 						</g>
 					{:else if travelPhase === 'arrival' && travelEndNode}
@@ -257,12 +364,13 @@
 				</svg>
 			{/if}
 
-			{#if currentNode && !routeProgress.isComplete}
+			{#if rocketNode}
 				<div
 					class="current-rocket"
-					class:arriving
-					style:left={`${(currentNode.x / STORY_MAP_WIDTH) * 100}%`}
-					style:top={`${(currentNode.y / STORY_MAP_HEIGHT) * 100}%`}
+					class:travel-hidden={travelling && travelPhase !== 'waiting'}
+					style:left={`${(rocketNode.x / STORY_MAP_WIDTH) * 100}%`}
+					style:top={`${(rocketNode.y / STORY_MAP_HEIGHT) * 100}%`}
+					data-rocket-node={rocketNode.id}
 					aria-hidden="true"
 				>
 					<span><Rocket size={28} strokeWidth={2.5} /></span>
@@ -391,12 +499,13 @@
 		text-transform: uppercase;
 	}
 
-	.story-difficulty-switch button:hover:not(.selected) {
+	.story-difficulty-switch button:hover:not(.selected):not(:disabled) {
 		color: white;
 		background: rgba(255, 255, 255, 0.07);
 	}
 
-	.story-difficulty-switch button:active { transform: scale(0.96); }
+	.story-difficulty-switch button:active:not(:disabled) { transform: scale(0.96); }
+	.story-difficulty-switch button:disabled { cursor: wait; }
 
 	.story-difficulty-switch button.selected {
 		color: var(--deep);
@@ -522,6 +631,11 @@
 		pointer-events: none;
 	}
 
+	.travel-motion-guide {
+		fill: none;
+		stroke: none;
+	}
+
 	.route-shadow,
 	.route-dashes,
 	.route-complete {
@@ -558,9 +672,10 @@
 		transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
 	}
 
-	.story-stop button:hover:not([aria-disabled='true']) { transform: translateY(-5px) rotate(-2deg); filter: brightness(1.08); }
-	.story-stop button:active:not([aria-disabled='true']) { transform: scale(0.96); }
+	.story-stop button:hover:not([aria-disabled='true']):not(:disabled) { transform: translateY(-5px) rotate(-2deg); filter: brightness(1.08); }
+	.story-stop button:active:not([aria-disabled='true']):not(:disabled) { transform: scale(0.96); }
 	.story-stop button[aria-disabled='true'] { cursor: default; }
+	.story-stop button:disabled { cursor: wait; }
 
 	.node-number {
 		position: absolute;
@@ -651,6 +766,7 @@
 	.story-stop.is-locked .story-planet, .story-stop.is-locked .story-ufo { filter: grayscale(0.65) saturate(0.45); opacity: 0.38; }
 	.story-stop.is-locked .node-number { opacity: 0.55; }
 	.story-stop.is-current button::before { content: ''; position: absolute; z-index: -1; inset: -14px; border: 2px solid var(--lime); border-radius: 50%; box-shadow: 0 0 0 7px rgba(214, 242, 71, 0.08), 0 0 28px rgba(214, 242, 71, 0.18); animation: currentPulse 1.7s ease-in-out infinite alternate; }
+	.story-stop.travel-target button::after { content: ''; position: absolute; z-index: -1; inset: -20px; border: 2px dashed var(--sky); border-radius: 50%; box-shadow: 0 0 30px rgba(167, 221, 237, 0.3); animation: destinationBeacon 1s linear infinite; }
 
 	.node-label {
 		position: absolute;
@@ -679,7 +795,7 @@
 		transition-duration: 240ms;
 	}
 
-	.current-rocket.arriving { opacity: 0; scale: 0.25; filter: blur(4px); }
+	.current-rocket.travel-hidden { opacity: 0; scale: 0.25; filter: blur(4px); }
 	.current-rocket span { width: 48px; height: 48px; display: grid; place-items: center; border-radius: 16px; color: var(--deep); background: white; box-shadow: 0 6px 0 #9ca5b9, 0 13px 22px rgba(0, 0, 0, 0.28); animation: rocketHover 1.5s ease-in-out infinite alternate; }
 
 	.travel-body { fill: white; stroke: var(--deep); stroke-width: 4; }
@@ -698,6 +814,7 @@
 	.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
 	@keyframes currentPulse { from { opacity: 0.55; transform: scale(0.97); } to { opacity: 1; transform: scale(1.04); } }
+	@keyframes destinationBeacon { from { transform: rotate(0deg) scale(0.96); } to { transform: rotate(360deg) scale(1.04); } }
 	@keyframes rocketHover { from { transform: translateY(-3px); } to { transform: translateY(3px); } }
 	@keyframes rocketIgnition { from { transform: translate(-2px, -1px) scale(0.96); } to { transform: translate(2px, 1px) scale(1.04); } }
 	@keyframes ignitionFlame { from { opacity: 0.48; transform: scaleX(0.55); } to { opacity: 1; transform: scaleX(1.18); } }
@@ -737,6 +854,7 @@
 		.story-stop button,
 		.current-rocket { transition-duration: 0.01ms; }
 		.story-stop.is-current button::before,
+		.story-stop.travel-target button::after,
 		.current-rocket span { animation: none; }
 		.travel-ship { display: none; }
 	}
