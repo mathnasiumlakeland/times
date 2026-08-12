@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
+	import { resolve } from '$app/paths';
 	import type { Attachment } from 'svelte/attachments';
 	import { SvelteSet } from 'svelte/reactivity';
 	import {
@@ -1230,7 +1231,7 @@
 
 		<footer>
 			<button class="brand footer-brand" type="button" onclick={scrollToPageTop}><span class="brand-mark"><Rocket size={17} /></span>Multiply Mission</button>
-			<p>Made for curious minds and future math legends.</p>
+			<a class="javier-credit" href={resolve('/javier')} aria-label="Open the secret Javier tribute">Inspired by Javier's awesome idea. Thanks, Javier!</a>
 		</footer>
 	</main>
 {:else if mode === 'quiz' || mode === 'challenge'}

@@ -215,6 +215,11 @@ p { text-wrap: pretty; }
 .badge-medallion span { position: absolute; font-family: 'Space Grotesk'; font-size: 15px; font-weight: 800; margin-top: 3px; }
 footer { min-height: 120px; padding: 30px max(clamp(20px, 7vw, 110px), env(safe-area-inset-right)) max(30px, env(safe-area-inset-bottom)) max(clamp(20px, 7vw, 110px), env(safe-area-inset-left)); display: flex; align-items: center; justify-content: space-between; gap: 20px; background: var(--deep); color: #79839a; font-size: 13px; }
 .footer-brand { color: white; }
+.javier-credit { position: relative; min-height: 44px; display: inline-flex; align-items: center; color: #919bb1; text-decoration: none; transition-property: color, transform; transition-duration: 180ms; transition-timing-function: cubic-bezier(.2,0,0,1); }
+.javier-credit::after { content: ''; position: absolute; left: 0; right: 0; bottom: 8px; height: 1px; background: var(--lime); transform: scaleX(0); transform-origin: right; transition-property: transform; transition-duration: 220ms; transition-timing-function: cubic-bezier(.2,0,0,1); }
+.javier-credit:hover { color: white; transform: translateY(-2px); }
+.javier-credit:hover::after { transform: scaleX(1); transform-origin: left; }
+.javier-credit:active { transform: scale(.96); }
 
 .game-page, .result-page { position: relative; width: 100%; max-width: 100%; min-height: 100svh; min-height: 100dvh; overflow: hidden; overflow-x: clip; color: white; background: var(--deep); }
 .challenge-page { overflow-y: auto; }
