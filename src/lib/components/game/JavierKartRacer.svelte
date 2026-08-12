@@ -4,15 +4,16 @@
 	import { resolve } from '$app/paths';
 	import {
 		ArrowLeft,
+		ChevronDown,
 		ChevronLeft,
 		ChevronRight,
+		ChevronUp,
 		Flag,
 		Gauge,
 		Music,
 		Pause,
 		Play,
 		RotateCcw,
-		RotateCw,
 		Sparkles,
 		Trophy,
 		Volume2,
@@ -53,12 +54,14 @@
 		musicStatus,
 		onToggleMusic,
 		onAudioGesture,
-		onMusicThemeChange
+		onMusicThemeChange,
+		onVisualReady
 	}: {
 		musicStatus: MusicStatus;
 		onToggleMusic: () => void;
 		onAudioGesture: () => void;
 		onMusicThemeChange: (theme: 'menu' | 'rainbow' | 'coconut') => void;
+		onVisualReady: () => void;
 	} = $props();
 
 	const courseChoices = [
@@ -97,14 +100,17 @@
 	let screen = $state<GameScreen>('select');
 	let paused = $state(false);
 	let hud = $state.raw<HudState>({ ...emptyHud });
-	let announcement = $state('Choose a course to begin the Javier Grand Prix.');
+	let announcement = $state('Choose a course to begin the Grand Prix.');
 	let canvas: HTMLCanvasElement;
 	let canvasWidth = 1;
 	let canvasHeight = 1;
 	let canvasScale = 1;
 	let race: RaceState | undefined;
 	let animationFrame = 0;
+	let resizeFrame = 0;
+	let settleResizeFrame = 0;
 	let resizeObserver: ResizeObserver | undefined;
+	let observedViewport: VisualViewport | undefined;
 	let lastFrameAt = 0;
 	let lastHudAt = 0;
 	let demoProgress = 0.93;
@@ -113,6 +119,9 @@
 	let finishHandled = false;
 	let finishTimer: number | undefined;
 	let lastDriftTier = 0;
+	let visualReadySent = false;
+	let renderFailureReported = false;
+	let canvasFailed = $state(false);
 	const keys = new SvelteSet<string>();
 	const pointerActions = new SvelteMap<number, InputAction>();
 	const touchInputs: Record<InputAction, boolean> = {
@@ -130,23 +139,71 @@
 	const shownItem = $derived(hud.roulette ? hud.roulettePreview : hud.item);
 
 	onMount(() => {
-		raceAudio = new KartAudio();
+		document.documentElement.classList.add('jkr-page');
+		document.body.classList.add('jkr-page');
+		try {
+			raceAudio = new KartAudio();
+		} catch {
+			// The visual game remains available on browsers that reject Web Audio setup.
+		}
 		reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-		resizeObserver = new ResizeObserver(resizeCanvas);
-		resizeObserver.observe(canvas);
+		if ('ResizeObserver' in window) {
+			try {
+				resizeObserver = new ResizeObserver(queueCanvasResize);
+				resizeObserver.observe(canvas);
+			} catch {
+				resizeObserver?.disconnect();
+				resizeObserver = undefined;
+			}
+		}
+		observedViewport = window.visualViewport ?? undefined;
+		observedViewport?.addEventListener('resize', queueCanvasResize);
+		window.addEventListener('resize', queueCanvasResize);
+		window.addEventListener('orientationchange', handleViewportRestore);
+		window.addEventListener('pageshow', handleViewportRestore);
 		resizeCanvas();
+		queueCanvasResize();
 		lastFrameAt = performance.now();
 		animationFrame = requestAnimationFrame(frame);
 	});
 
 	onDestroy(() => {
 		if (typeof window !== 'undefined') window.cancelAnimationFrame(animationFrame);
+		if (typeof window !== 'undefined') window.cancelAnimationFrame(resizeFrame);
+		if (typeof window !== 'undefined') window.cancelAnimationFrame(settleResizeFrame);
 		if (typeof window !== 'undefined' && finishTimer !== undefined) window.clearTimeout(finishTimer);
 		resizeObserver?.disconnect();
+		observedViewport?.removeEventListener('resize', queueCanvasResize);
+		if (typeof window !== 'undefined') {
+			window.removeEventListener('resize', queueCanvasResize);
+			window.removeEventListener('orientationchange', handleViewportRestore);
+			window.removeEventListener('pageshow', handleViewportRestore);
+		}
+		if (typeof document !== 'undefined') {
+			document.documentElement.classList.remove('jkr-page');
+			document.body.classList.remove('jkr-page');
+		}
 		raceAudio?.destroy();
 		keys.clear();
 		pointerActions.clear();
 	});
+
+	function queueCanvasResize() {
+		if (typeof window === 'undefined') return;
+		window.cancelAnimationFrame(resizeFrame);
+		window.cancelAnimationFrame(settleResizeFrame);
+		resizeFrame = window.requestAnimationFrame(() => {
+			resizeCanvas();
+			settleResizeFrame = window.requestAnimationFrame(resizeCanvas);
+		});
+	}
+
+	function handleViewportRestore() {
+		lastFrameAt = performance.now();
+		queueCanvasResize();
+		window.cancelAnimationFrame(animationFrame);
+		animationFrame = window.requestAnimationFrame(frame);
+	}
 
 	function resizeCanvas() {
 		if (!canvas) return;
@@ -162,33 +219,54 @@
 	}
 
 	function frame(now: number) {
+		// Queue first so a recoverable renderer error cannot permanently freeze the canvas.
+		animationFrame = requestAnimationFrame(frame);
 		const delta = Math.min(0.05, Math.max(0, (now - lastFrameAt) / 1000));
 		lastFrameAt = now;
 
-		if (race && screen === 'race' && !paused) {
-			updateRace(race, readInput(), delta);
-			handleRaceEvents(getRaceEvents(race));
-			if (now - lastHudAt > 70) {
-				hud = snapshotHud(race);
-				lastHudAt = now;
+		try {
+			if (race && screen === 'race' && !paused) {
+				updateRace(race, readInput(), delta);
+				handleRaceEvents(getRaceEvents(race));
+				if (now - lastHudAt > 70) {
+					hud = snapshotHud(race);
+					lastHudAt = now;
+				}
+				const maxSpeed = Math.max(1, race.track.maxSpeed);
+				raceAudio?.setEngine(race.player.speed / maxSpeed, readInput().throttle > 0);
+				if (race.finished && !finishHandled) finishRace();
+			} else if (!race) {
+				demoProgress = (demoProgress + delta * (reducedMotion ? 0.004 : 0.022)) % 1;
 			}
-			const maxSpeed = Math.max(1, race.track.maxSpeed);
-			raceAudio?.setEngine(race.player.speed / maxSpeed, readInput().throttle > 0);
-			if (race.finished && !finishHandled) finishRace();
-		} else if (!race) {
-			demoProgress = (demoProgress + delta * (reducedMotion ? 0.004 : 0.022)) % 1;
-		}
 
-		render(now / 1000);
-		animationFrame = requestAnimationFrame(frame);
+			if (render(now / 1000)) {
+				canvasFailed = false;
+				renderFailureReported = false;
+				if (!visualReadySent) {
+					visualReadySent = true;
+					onVisualReady();
+				}
+			}
+		} catch (error) {
+			canvasFailed = true;
+			if (!renderFailureReported) {
+				renderFailureReported = true;
+				console.error('Grand Prix renderer recovered from an error.', error);
+			}
+		}
 	}
 
 	function render(time: number) {
 		const context = canvas?.getContext('2d');
-		if (!context) return;
+		if (!context) {
+			canvasFailed = true;
+			return false;
+		}
+		if (canvasWidth < 2 || canvasHeight < 2) return false;
 		context.setTransform(canvasScale, 0, 0, canvasScale, 0, 0);
 		const renderState = race ? toRenderState(race, time) : demoRenderState(time);
 		renderKartRace(context, canvasWidth, canvasHeight, renderState);
+		return true;
 	}
 
 	function demoRenderState(time: number): KartRenderState {
@@ -309,16 +387,14 @@
 		};
 	}
 
-	async function startRace() {
+	function startRace() {
 		if (finishTimer !== undefined) window.clearTimeout(finishTimer);
 		finishTimer = undefined;
 		onMusicThemeChange(selectedTrack === 'prism-circuit' ? 'rainbow' : 'coconut');
 		onAudioGesture();
-		try {
-			await raceAudio?.unlock();
-		} catch {
-			// The race stays playable when Web Audio is blocked.
-		}
+		void raceAudio?.unlock().catch(() => {
+			// The race starts immediately even when Web Audio is blocked or still suspended.
+		});
 		race = createRaceState(selectedTrack, { laps: 3, seed: Math.floor(performance.now()) });
 		hud = snapshotHud(race);
 		screen = 'race';
@@ -326,7 +402,7 @@
 		finishHandled = false;
 		lastDriftTier = 0;
 		announcement = `${selectedCourse.name}. Three laps. Get ready.`;
-		raceAudio?.startEngine();
+		playRaceSound((audio) => audio.startEngine());
 	}
 
 	function finishRace() {
@@ -334,7 +410,7 @@
 		finishHandled = true;
 		hud = snapshotHud(race);
 		raceAudio?.stopEngine();
-		raceAudio?.playFinish(race.player.rank === 1);
+		playRaceSound((audio) => audio.playFinish(race?.player.rank === 1));
 		announcement = `Finished ${formatPlacement(race.player.rank)} in ${formatTime(race.raceTime)}.`;
 		finishTimer = window.setTimeout(() => {
 			screen = 'finish';
@@ -355,7 +431,7 @@
 		screen = 'select';
 		paused = false;
 		hud = { ...emptyHud };
-		announcement = 'Choose a course to begin the Javier Grand Prix.';
+		announcement = 'Choose a course to begin the Grand Prix.';
 		clearInputs();
 	}
 
@@ -373,7 +449,7 @@
 			announcement = 'Race paused.';
 		} else {
 			lastFrameAt = performance.now();
-			raceAudio?.startEngine();
+			playRaceSound((audio) => audio.startEngine());
 			announcement = 'Race resumed.';
 		}
 	}
@@ -382,19 +458,19 @@
 		for (const event of events) {
 			switch (event.type) {
 				case 'countdown':
-					raceAudio?.playCountdown(false);
+					playRaceSound((audio) => audio.playCountdown(false));
 					announcement = String(event.value);
 					break;
 				case 'go':
-					raceAudio?.playCountdown(true);
+					playRaceSound((audio) => audio.playCountdown(true));
 					announcement = 'Ignite!';
 					break;
 				case 'drift':
-					if (event.tier > lastDriftTier) raceAudio?.playDriftSpark(event.tier);
+					if (event.tier > lastDriftTier) playRaceSound((audio) => audio.playDriftSpark(event.tier));
 					lastDriftTier = event.tier;
 					break;
 				case 'boost':
-					raceAudio?.playBoost();
+					playRaceSound((audio) => audio.playBoost());
 					lastDriftTier = 0;
 					announcement = 'Mini boost!';
 					break;
@@ -403,30 +479,30 @@
 					break;
 				case 'roulette-start':
 					if (event.racerId === 'player') {
-						raceAudio?.playPickup();
+						playRaceSound((audio) => audio.playPickup());
 						announcement = 'Item roulette!';
 					}
 					break;
 				case 'roulette-tick':
-					if (event.racerId === 'player') raceAudio?.playRouletteTick(event.index);
+					if (event.racerId === 'player') playRaceSound((audio) => audio.playRouletteTick(event.index));
 					break;
 				case 'roulette-award':
-					if (event.racerId === 'player') raceAudio?.playItemReady(event.item);
+					if (event.racerId === 'player') playRaceSound((audio) => audio.playItemReady(event.item));
 					break;
 				case 'item':
 					break;
 				case 'item-use':
 					if (event.racerId === 'player') {
-						if (event.item === 'banana') raceAudio?.playBananaDrop();
-						else raceAudio?.playShellLaunch(event.item === 'red-shell');
+						if (event.item === 'banana') playRaceSound((audio) => audio.playBananaDrop());
+						else playRaceSound((audio) => audio.playShellLaunch(event.item === 'red-shell'));
 						announcement = `${itemLabel(event.item)} deployed!`;
 					}
 					break;
 				case 'projectile-bounce':
-					if (event.ownerId === 'player') raceAudio?.playShellBounce();
+					if (event.ownerId === 'player') playRaceSound((audio) => audio.playShellBounce());
 					break;
 				case 'item-hit':
-					if (event.targetId === 'player' || event.ownerId === 'player') raceAudio?.playHit();
+					if (event.targetId === 'player' || event.ownerId === 'player') playRaceSound((audio) => audio.playHit());
 					if (event.targetId === 'player') {
 						if ('vibrate' in navigator) navigator.vibrate(55);
 						announcement = `${itemLabel(event.item)} impact! Recover your line.`;
@@ -436,7 +512,7 @@
 					break;
 				case 'hit':
 					if (event.source !== 'item') {
-						raceAudio?.playHit();
+						playRaceSound((audio) => audio.playHit());
 						if ('vibrate' in navigator) navigator.vibrate(45);
 						announcement =
 							event.source === 'obstacle' ? 'Mall obstacle! Find the open lane.' : 'Impact! Recover your line.';
@@ -445,7 +521,7 @@
 				case 'pickup-respawn':
 					break;
 				case 'lap':
-					raceAudio?.playLap();
+					playRaceSound((audio) => audio.playLap());
 					announcement = event.lap >= 3 ? 'Final lap!' : `Lap ${event.lap}.`;
 					break;
 				case 'finish':
@@ -454,7 +530,20 @@
 		}
 	}
 
+	function playRaceSound(play: (audio: KartAudio) => void) {
+		if (!raceAudio) return;
+		try {
+			play(raceAudio);
+		} catch {
+			// Unsupported or interrupted Web Audio never blocks the visual race.
+		}
+	}
+
 	function handleKeyDown(event: KeyboardEvent) {
+		const target = event.target;
+		const isInteractiveTarget =
+			target instanceof Element && Boolean(target.closest('button, a, input, select, textarea, [contenteditable="true"]'));
+		if (isInteractiveTarget) return;
 		if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(event.code)) event.preventDefault();
 		if (event.code === 'Escape' && screen === 'race') {
 			togglePause();
@@ -526,19 +615,97 @@
 <svelte:window onkeydown={handleKeyDown} onkeyup={handleKeyUp} onblur={handleWindowBlur} />
 <svelte:document onvisibilitychange={handleVisibilityChange} />
 
+{#snippet itemArtwork(item: KartItem | null)}
+	{#if item === 'green-shell' || item === 'red-shell'}
+		<svg class:red-shell={item === 'red-shell'} class="jkr-item-art jkr-shell-art" viewBox="0 0 72 64" role="presentation">
+			<g class="jkr-shell-feet">
+				<path d="M14 24C7 23 4 27 6 33c2 5 8 6 14 3Z" />
+				<path d="M58 24c7-1 10 3 8 9-2 5-8 6-14 3Z" />
+				<path d="M19 43c-6 2-7 7-3 11 4 3 10 1 14-4Z" />
+				<path d="M53 43c6 2 7 7 3 11-4 3-10 1-14-4Z" />
+			</g>
+			<ellipse class="jkr-shell-rim" cx="36" cy="34" rx="27" ry="23" />
+			<ellipse class="jkr-shell-dome" cx="36" cy="32" rx="22" ry="18" />
+			<path class="jkr-shell-panels" d="M36 18 45 26 42 38 30 38 27 26Zm-9 8-12 2m30-2 12 2M30 38l-6 11m18-11 6 11" />
+			<path class="jkr-shell-shine" d="M22 26c4-6 10-9 17-9" />
+		</svg>
+	{:else if item === 'banana'}
+		<svg class="jkr-item-art jkr-banana-art" viewBox="0 0 72 68" role="presentation">
+			<path class="jkr-banana-flap jkr-banana-left" d="M34 29C28 38 20 43 8 48c3 8 13 9 21 3 6-5 8-13 8-22Z" />
+			<path class="jkr-banana-flap jkr-banana-right" d="M38 29c6 9 14 14 26 19-3 8-13 9-21 3-6-5-8-13-8-22Z" />
+			<path class="jkr-banana-flap jkr-banana-center" d="M35 29c-2 12-3 22 1 33 8-1 12-8 9-17-2-7-6-12-10-16Z" />
+			<ellipse class="jkr-banana-core" cx="36" cy="29" rx="8" ry="7" />
+			<path class="jkr-banana-stem" d="M36 25c-2-9 1-15 6-20" />
+			<path class="jkr-banana-tip" d="m40 7 5-5" />
+			<path class="jkr-banana-glint" d="M16 46c5-2 9-5 13-9" />
+		</svg>
+	{:else}
+		<strong class="jkr-item-question">?</strong>
+	{/if}
+{/snippet}
+
+{#snippet coursePicker()}
+	<div class="jkr-course-picker">
+		<div class="jkr-picker-heading">
+			<span>Choose your course</span>
+			<strong>{selectedCourseNumber} / 02</strong>
+		</div>
+		<div class="jkr-course-list">
+			{#each courseChoices as course (course.id)}
+				<button
+					class:selected={selectedTrack === course.id}
+					class="jkr-course-option"
+					type="button"
+					onclick={() => selectCourse(course.id)}
+					aria-pressed={selectedTrack === course.id}
+				>
+					<span class="jkr-course-number">{course.id === 'prism-circuit' ? '01' : '02'}</span>
+					<span class="jkr-course-copy">
+						<small>{course.energy}</small>
+						<strong>{course.name}</strong>
+						<span>{course.description}</span>
+					</span>
+					<span class="jkr-course-art" aria-hidden="true">
+						{#if course.id === 'prism-circuit'}
+							<svg viewBox="0 0 128 72" role="presentation">
+								<circle cx="102" cy="15" r="11" fill="#8d75ff" />
+								<path d="M53 72C58 48 73 37 104 25" fill="none" stroke="#251454" stroke-width="27" />
+								<path d="M51 72C58 47 73 36 106 24" fill="none" stroke="#d6f247" stroke-width="4" />
+								<path d="M63 72C66 51 78 41 111 30" fill="none" stroke="#66dfff" stroke-width="4" />
+								<path d="M42 72C50 44 66 31 99 20" fill="none" stroke="#ff718d" stroke-width="4" />
+							</svg>
+						{:else}
+							<svg viewBox="0 0 128 72" role="presentation">
+								<path d="M4 15H124L104 60H23Z" fill="#d9f4ea" opacity=".9" />
+								<path d="M48 72C51 46 68 38 96 30" fill="none" stroke="#405968" stroke-width="28" />
+								<path d="M39 72C44 43 62 31 96 24" fill="none" stroke="#ff718d" stroke-width="4" />
+								<path d="M59 72C59 52 72 43 101 36" fill="none" stroke="#ffd45a" stroke-width="4" />
+								<path d="M18 11V48M18 21L7 13M18 22L31 13" stroke="#2aa67b" stroke-width="5" stroke-linecap="round" />
+							</svg>
+						{/if}
+					</span>
+					<span class="jkr-select-dot"><span></span></span>
+				</button>
+			{/each}
+		</div>
+		<button class="jkr-start" type="button" onclick={() => void startRace()}>
+			<span><Flag size={20} strokeWidth={2.6} /> Race {selectedCourse.name}</span>
+			<ChevronRight size={21} strokeWidth={2.8} />
+		</button>
+	</div>
+{/snippet}
+
 <main
 	class:race-active={screen === 'race'}
 	class:course-galleria={selectedTrack === 'sunset-galleria'}
 	class="jkr-shell"
 >
-	<canvas bind:this={canvas} class="jkr-canvas" aria-label={`Javier Grand Prix race view on ${selectedCourse.name}`}></canvas>
-	<div class="jkr-vignette" aria-hidden="true"></div>
 	<p class="jkr-live" aria-live="polite">{announcement}</p>
 
-	<div class="jkr-topbar">
+	<div class="jkr-topbar" inert={paused || screen === 'finish'}>
 		<a class="jkr-brand" href={resolve('/')} aria-label="Back to Multiply Mission">
 			<span class="jkr-brand-mark"><Zap size={17} strokeWidth={3} /></span>
-			<span>Javier <strong>GP</strong></span>
+			<span>Grand <strong>Prix</strong></span>
 		</a>
 
 		{#if screen !== 'select'}
@@ -571,118 +738,81 @@
 		</div>
 	</div>
 
-	{#if screen === 'select'}
-		<section class="jkr-select" aria-labelledby="jkr-title">
-			<div class="jkr-title-block">
-				<p class="jkr-kicker"><span></span> Secret route 01 · For Javier</p>
-				<h1 id="jkr-title"><span>Javier</span> Grand Prix</h1>
-				<div class="jkr-key-legend" aria-label="Keyboard controls">
-					<span><kbd>WASD</kbd> drive</span>
-					<span><kbd>SPACE</kbd> drift</span>
-					<span><kbd>E</kbd> item</span>
-				</div>
+	<div class="jkr-screen-frame" inert={paused || screen === 'finish'}>
+		<canvas bind:this={canvas} class="jkr-canvas" aria-label={`Grand Prix race view on ${selectedCourse.name}`}></canvas>
+		<div class="jkr-vignette" aria-hidden="true"></div>
+		{#if canvasFailed}
+			<div class="jkr-canvas-fallback" role="status">
+				<strong>Reconnecting race screen</strong>
+				<span>The game will resume automatically.</span>
 			</div>
-
-			<div class="jkr-course-picker">
-				<div class="jkr-picker-heading">
-					<span>Choose your course</span>
-					<strong>{selectedCourseNumber} / 02</strong>
-				</div>
-				<div class="jkr-course-list">
-					{#each courseChoices as course (course.id)}
-						<button
-							class:selected={selectedTrack === course.id}
-							class="jkr-course-option"
-							type="button"
-							onclick={() => selectCourse(course.id)}
-							aria-pressed={selectedTrack === course.id}
-						>
-							<span class="jkr-course-number">{course.id === 'prism-circuit' ? '01' : '02'}</span>
-							<span class="jkr-course-copy">
-								<small>{course.energy}</small>
-								<strong>{course.name}</strong>
-								<span>{course.description}</span>
-							</span>
-							<span class="jkr-course-art" aria-hidden="true">
-								{#if course.id === 'prism-circuit'}
-									<svg viewBox="0 0 128 72" role="presentation">
-										<circle cx="102" cy="15" r="11" fill="#8d75ff" />
-										<path d="M53 72C58 48 73 37 104 25" fill="none" stroke="#251454" stroke-width="27" />
-										<path d="M51 72C58 47 73 36 106 24" fill="none" stroke="#d6f247" stroke-width="4" />
-										<path d="M63 72C66 51 78 41 111 30" fill="none" stroke="#66dfff" stroke-width="4" />
-										<path d="M42 72C50 44 66 31 99 20" fill="none" stroke="#ff718d" stroke-width="4" />
-									</svg>
-								{:else}
-									<svg viewBox="0 0 128 72" role="presentation">
-										<path d="M4 15H124L104 60H23Z" fill="#d9f4ea" opacity=".9" />
-										<path d="M48 72C51 46 68 38 96 30" fill="none" stroke="#405968" stroke-width="28" />
-										<path d="M39 72C44 43 62 31 96 24" fill="none" stroke="#ff718d" stroke-width="4" />
-										<path d="M59 72C59 52 72 43 101 36" fill="none" stroke="#ffd45a" stroke-width="4" />
-										<path d="M18 11V48M18 21L7 13M18 22L31 13" stroke="#2aa67b" stroke-width="5" stroke-linecap="round" />
-									</svg>
-								{/if}
-							</span>
-							<span class="jkr-select-dot"><span></span></span>
-						</button>
-					{/each}
-				</div>
-				<button class="jkr-start" type="button" onclick={() => void startRace()}>
-					<span><Flag size={20} strokeWidth={2.6} /> Race {selectedCourse.name}</span>
-					<ChevronRight size={21} strokeWidth={2.8} />
-				</button>
-			</div>
-		</section>
-	{:else}
-		<section class="jkr-hud" aria-label="Race status">
-			<div class="jkr-rank-block">
-				<strong>{placement}</strong>
-				<span>of 8 racers</span>
-			</div>
-			<div class="jkr-lap-block">
-				<span>Lap</span>
-				<strong>{hud.lap}<small>/{hud.laps}</small></strong>
-			</div>
-			<div class="jkr-time-block"><span>Race time</span><strong>{formatTime(hud.time)}</strong></div>
-		</section>
-
-		<div class="jkr-speedometer" aria-label={`${hud.speed} kilometers per hour`}>
-			<Gauge size={18} strokeWidth={2.5} />
-			<strong>{hud.speed}</strong>
-			<span>KM/H</span>
-		</div>
-
-		<div class="jkr-boost-meter">
-			<div class="jkr-boost-label"><span><Sparkles size={14} /> Mini turbo</span><strong>{Math.round(Math.max(hud.boost, hud.drift) * 100)}%</strong></div>
-			<div class="jkr-boost-track"><span style:width={`${Math.max(hud.boost, hud.drift) * 100}%`}></span></div>
-		</div>
-
-		<div
-			class:roulette={hud.roulette}
-			class:ready={Boolean(hud.item)}
-			class="jkr-item-slot"
-			aria-label={hud.roulette ? 'Choosing an item' : shownItem ? `${itemLabel(shownItem)} ready. Press E to use.` : 'No item'}
-		>
-			<span class="jkr-item-title">{hud.roulette ? 'Roulette' : hud.item ? itemLabel(hud.item) : 'Item'}</span>
-			<div class="jkr-item-icon" aria-hidden="true">
-				{#if shownItem === 'green-shell' || shownItem === 'red-shell'}
-					<i class:red={shownItem === 'red-shell'} class="jkr-shell-item"><b></b></i>
-				{:else if shownItem === 'banana'}
-					<i class="jkr-banana-item"><b></b><b></b><b></b></i>
-				{:else}
-					<strong>?</strong>
-				{/if}
-			</div>
-			<small>{hud.roulette ? 'Choosing...' : hud.item ? 'Press E' : 'Find a ? box'}</small>
-		</div>
-
-		{#if hud.countdown}
-			<div class="jkr-countdown" aria-hidden="true"><span>{hud.countdown}</span></div>
 		{/if}
 
-		<div class="jkr-touch-controls" aria-label="Touch race controls">
+		{#if screen === 'select'}
+			<section class="jkr-select" aria-labelledby="jkr-title">
+				<div class="jkr-title-block">
+					<p class="jkr-kicker"><span></span> Bonus circuit</p>
+					<h1 id="jkr-title">Grand <span>Prix</span></h1>
+					<div class="jkr-key-legend" aria-label="Keyboard controls">
+						<span><kbd>WASD</kbd> drive</span>
+						<span><kbd>SPACE</kbd> drift</span>
+						<span><kbd>E</kbd> item</span>
+					</div>
+				</div>
+
+				{@render coursePicker()}
+			</section>
+		{:else}
+			<section class="jkr-hud" aria-label="Race status">
+				<div class="jkr-rank-block">
+					<strong>{placement}</strong>
+					<span>of 8 racers</span>
+				</div>
+				<div class="jkr-lap-block">
+					<span>Lap</span>
+					<strong>{hud.lap}<small>/{hud.laps}</small></strong>
+				</div>
+				<div class="jkr-time-block"><span>Race time</span><strong>{formatTime(hud.time)}</strong></div>
+			</section>
+
+			<div class="jkr-speedometer" aria-label={`${hud.speed} kilometers per hour`}>
+				<Gauge size={18} strokeWidth={2.5} />
+				<strong>{hud.speed}</strong>
+				<span>KM/H</span>
+			</div>
+
+			<div class="jkr-boost-meter">
+				<div class="jkr-boost-label"><span><Sparkles size={14} /> Mini turbo</span><strong>{Math.round(Math.max(hud.boost, hud.drift) * 100)}%</strong></div>
+				<div class="jkr-boost-track"><span style:width={`${Math.max(hud.boost, hud.drift) * 100}%`}></span></div>
+			</div>
+
+			<div
+				class:roulette={hud.roulette}
+				class:ready={Boolean(hud.item)}
+				class="jkr-item-slot"
+				aria-label={hud.roulette ? 'Choosing an item' : shownItem ? `${itemLabel(shownItem)} ready. Press E to use.` : 'No item'}
+			>
+				<span class="jkr-item-title">{hud.roulette ? 'Roulette' : hud.item ? itemLabel(hud.item) : 'Item'}</span>
+				<div class="jkr-item-icon" aria-hidden="true">{@render itemArtwork(shownItem)}</div>
+				<small>{hud.roulette ? 'Choosing...' : hud.item ? 'Press E' : 'Find a ? box'}</small>
+			</div>
+
+			{#if hud.countdown}
+				<div class="jkr-countdown" aria-hidden="true"><span>{hud.countdown}</span></div>
+			{/if}
+		{/if}
+	</div>
+
+	{#if screen === 'select'}
+		<div class="jkr-mobile-course-deck">{@render coursePicker()}</div>
+	{:else if screen === 'race'}
+		<div class="jkr-touch-controls" aria-label="Touch race controls" inert={paused}>
 			<div class="jkr-steer-controls">
-				<button type="button" aria-label="Steer left" onpointerdown={(event) => pressControl('left', event)} onpointerup={releaseControl} onpointercancel={releaseControl} onlostpointercapture={releaseControl}><ChevronLeft size={31} strokeWidth={3} /></button>
-				<button type="button" aria-label="Steer right" onpointerdown={(event) => pressControl('right', event)} onpointerup={releaseControl} onpointercancel={releaseControl} onlostpointercapture={releaseControl}><ChevronRight size={31} strokeWidth={3} /></button>
+				<button class="jkr-dpad-up" type="button" aria-label="Accelerate" onpointerdown={(event) => pressControl('throttle', event)} onpointerup={releaseControl} onpointercancel={releaseControl} onlostpointercapture={releaseControl}><ChevronUp size={25} strokeWidth={3} /></button>
+				<button class="jkr-dpad-left" type="button" aria-label="Steer left" onpointerdown={(event) => pressControl('left', event)} onpointerup={releaseControl} onpointercancel={releaseControl} onlostpointercapture={releaseControl}><ChevronLeft size={27} strokeWidth={3} /></button>
+				<span class="jkr-dpad-center" aria-hidden="true"></span>
+				<button class="jkr-dpad-right" type="button" aria-label="Steer right" onpointerdown={(event) => pressControl('right', event)} onpointerup={releaseControl} onpointercancel={releaseControl} onlostpointercapture={releaseControl}><ChevronRight size={27} strokeWidth={3} /></button>
+				<button class="jkr-dpad-down" type="button" aria-label="Brake" onpointerdown={(event) => pressControl('brake', event)} onpointerup={releaseControl} onpointercancel={releaseControl} onlostpointercapture={releaseControl}><ChevronDown size={25} strokeWidth={3} /></button>
 			</div>
 			<div class="jkr-action-controls">
 				<button class="jkr-touch-brake" type="button" aria-label="Brake" onpointerdown={(event) => pressControl('brake', event)} onpointerup={releaseControl} onpointercancel={releaseControl} onlostpointercapture={releaseControl}>BRAKE</button>
@@ -691,13 +821,14 @@
 					class:ready={Boolean(hud.item)}
 					class="jkr-touch-item"
 					type="button"
-					aria-label={hud.item ? `Use ${itemLabel(hud.item)}` : 'Use item'}
+					disabled={!hud.item}
+					aria-label={hud.item ? `Use ${itemLabel(hud.item)}` : 'No item available'}
 					onpointerdown={(event) => pressControl('item', event)}
 					onpointerup={releaseControl}
 					onpointercancel={releaseControl}
 					onlostpointercapture={releaseControl}
 				>
-					{#if hud.roulette}<span class="jkr-touch-question">?</span>{:else if hud.item === 'banana'}<span class="jkr-touch-banana">◆</span>{:else}<Zap size={20} fill="currentColor" />{/if}
+					<span class="jkr-control-item-art" aria-hidden="true">{@render itemArtwork(hud.item)}</span>
 				</button>
 				<button class="jkr-touch-go" type="button" aria-label="Accelerate" onpointerdown={(event) => pressControl('throttle', event)} onpointerup={releaseControl} onpointercancel={releaseControl} onlostpointercapture={releaseControl}>GO</button>
 			</div>
@@ -706,7 +837,7 @@
 
 	{#if paused && screen === 'race'}
 		<div class="jkr-modal-wrap">
-			<section class="jkr-modal jkr-pause-modal" aria-labelledby="pause-title">
+			<div class="jkr-modal jkr-pause-modal" role="dialog" aria-modal="true" aria-labelledby="pause-title">
 				<p class="jkr-modal-kicker">Pit stop</p>
 				<h2 id="pause-title">Race paused.</h2>
 				<p>Your place is frozen. The soundtrack keeps rolling.</p>
@@ -716,17 +847,17 @@
 					<button type="button" onclick={chooseCourse}><Flag size={18} /> Switch course</button>
 				</div>
 				<a href={resolve('/')}><ArrowLeft size={16} /> Back to Multiply Mission</a>
-			</section>
+			</div>
 		</div>
 	{/if}
 
 	{#if screen === 'finish'}
 		<div class="jkr-modal-wrap jkr-finish-wrap">
-			<section class="jkr-modal jkr-finish-modal" aria-labelledby="finish-title">
+			<div class="jkr-modal jkr-finish-modal" role="dialog" aria-modal="true" aria-labelledby="finish-title">
 				<div class="jkr-trophy"><Trophy size={42} strokeWidth={2.4} /></div>
 				<p class="jkr-modal-kicker">Transmission complete</p>
 				<h2 id="finish-title">{placement} place!</h2>
-				<p>{hud.rank === 1 ? 'Javier takes the crown. The idea kart is unstoppable.' : 'Clean racing. One more run and the podium is yours.'}</p>
+				<p>{hud.rank === 1 ? 'You take the crown. The idea kart is unstoppable.' : 'Clean racing. One more run and the podium is yours.'}</p>
 				<div class="jkr-results-row">
 					<span><small>Course</small><strong>{selectedCourse.name}</strong></span>
 					<span><small>Time</small><strong>{formatTime(hud.time)}</strong></span>
@@ -737,25 +868,22 @@
 					<button type="button" onclick={chooseCourse}><Flag size={18} /> Choose course</button>
 				</div>
 				<a href={resolve('/')}><ArrowLeft size={16} /> Back to Multiply Mission</a>
-			</section>
+			</div>
 		</div>
 	{/if}
 
-	<div class="jkr-rotate" aria-hidden="true">
-		<div class="jkr-phone"><span></span></div>
-		<span class="jkr-rotate-icon"><RotateCw size={31} strokeWidth={2.3} /></span>
-		<strong>Turn sideways to race</strong>
-		<p>The Javier Grand Prix is built for landscape mode.</p>
-	</div>
 </main>
 
 <style>
-	:global(html:has(.jkr-shell)), :global(body:has(.jkr-shell)) { height: 100%; overflow: hidden; background: #060a18; }
+	:global(html.jkr-page), :global(body.jkr-page), :global(html:has(.jkr-shell)), :global(body:has(.jkr-shell)) { height: 100%; overflow: hidden; background: #060a18; }
 
 	.jkr-shell {
 		--ease: cubic-bezier(.2, 0, 0, 1);
 		position: fixed;
 		inset: 0;
+		width: 100vw;
+		height: 100vh;
+		height: 100dvh;
 		isolation: isolate;
 		min-width: 320px;
 		overflow: hidden;
@@ -766,10 +894,15 @@
 		user-select: none;
 	}
 
+	.jkr-screen-frame { position: absolute; z-index: 0; inset: 0; overflow: hidden; }
 	.jkr-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 	.jkr-vignette { position: absolute; inset: 0; z-index: 1; pointer-events: none; background: linear-gradient(90deg, rgba(3,5,14,.9) 0%, rgba(3,5,14,.55) 35%, transparent 68%), linear-gradient(0deg, rgba(3,5,14,.55), transparent 30%); }
 	.race-active .jkr-vignette { background: radial-gradient(circle at 50% 46%, transparent 37%, rgba(2,4,13,.16) 74%, rgba(2,4,13,.45) 100%); }
 	.jkr-live { position: fixed; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+	.jkr-canvas-fallback { position: absolute; z-index: 30; inset: 0; padding: 28px; display: grid; place-content: center; gap: 7px; color: white; background: radial-gradient(circle at 50% 35%, #20184b, #070b19 68%); text-align: center; }
+	.jkr-canvas-fallback strong { color: #d6f247; font-family: 'Space Grotesk', sans-serif; font-size: 20px; }
+	.jkr-canvas-fallback span { color: #9da8be; font-size: 12px; }
+	.jkr-mobile-course-deck { display: none; }
 
 	.jkr-topbar { position: absolute; z-index: 20; left: 0; right: 0; top: 0; min-height: calc(72px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) max(22px, env(safe-area-inset-right)) 0 max(22px, env(safe-area-inset-left)); display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 20px; pointer-events: none; }
 	.jkr-brand, .jkr-top-actions, .jkr-course-chip { pointer-events: auto; }
@@ -855,17 +988,26 @@
 	.jkr-item-icon > strong { font-family: 'Space Grotesk', sans-serif; font-size: 38px; line-height: 1; }
 	.jkr-item-slot small { color: #d6f247; font-size: 8px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
 	.jkr-item-slot.roulette .jkr-item-icon { animation: jkrRoulette 110ms steps(2, end) infinite; }
-	.jkr-shell-item { position: relative; width: 44px; height: 38px; display: block; border: 4px solid #15213a; border-radius: 50%; background: #32c96b; box-shadow: inset 0 0 0 4px rgba(255,255,255,.35); transform: rotate(-7deg); }
-	.jkr-shell-item.red { background: #f04462; }
-	.jkr-shell-item::before, .jkr-shell-item::after, .jkr-shell-item b { content: ''; position: absolute; background: #15213a; }
-	.jkr-shell-item::before { left: 7px; right: 7px; top: 15px; height: 3px; transform: rotate(24deg); }
-	.jkr-shell-item::after { left: 19px; top: 3px; width: 3px; height: 28px; transform: rotate(-20deg); }
-	.jkr-shell-item b { left: 15px; top: 12px; width: 7px; height: 7px; border-radius: 50%; }
-	.jkr-banana-item { position: relative; width: 48px; height: 45px; display: block; }
-	.jkr-banana-item b { position: absolute; left: 19px; bottom: 4px; width: 13px; height: 38px; border: 4px solid #7c5211; border-top: 0; border-radius: 0 0 17px 17px; background: #ffd839; transform-origin: 50% 100%; }
-	.jkr-banana-item b:first-child { transform: rotate(-42deg); }
-	.jkr-banana-item b:nth-child(2) { transform: rotate(0); }
-	.jkr-banana-item b:nth-child(3) { transform: rotate(42deg); }
+	.jkr-item-art { width: 58px; height: 58px; display: block; overflow: visible; filter: drop-shadow(0 3px 0 rgba(12,17,35,.2)); }
+	.jkr-shell-feet { fill: #fff3d1; stroke: #131b32; stroke-width: 3.4; stroke-linejoin: round; }
+	.jkr-shell-rim { fill: #f7e5b6; stroke: #131b32; stroke-width: 4; }
+	.jkr-shell-dome { fill: #31c86f; stroke: #174c36; stroke-width: 2.8; }
+	.jkr-shell-art.red-shell .jkr-shell-dome { fill: #f04460; stroke: #792039; }
+	.jkr-shell-panels { fill: none; stroke: #174c36; stroke-width: 2.8; stroke-linecap: round; stroke-linejoin: round; }
+	.jkr-shell-art.red-shell .jkr-shell-panels { stroke: #792039; }
+	.jkr-shell-shine { fill: none; stroke: rgba(255,255,255,.7); stroke-width: 3; stroke-linecap: round; }
+	.jkr-banana-flap { stroke: #654415; stroke-width: 3.2; stroke-linejoin: round; }
+	.jkr-banana-left { fill: #ffc72e; }
+	.jkr-banana-right { fill: #ffda3f; }
+	.jkr-banana-center { fill: #f4b721; }
+	.jkr-banana-core { fill: #fff0aa; stroke: #76501a; stroke-width: 2.7; }
+	.jkr-banana-stem { fill: none; stroke: #ffd83d; stroke-width: 7; stroke-linecap: round; }
+	.jkr-banana-tip { fill: none; stroke: #3e2b1d; stroke-width: 4; stroke-linecap: round; }
+	.jkr-banana-glint { fill: none; stroke: rgba(255,255,255,.62); stroke-width: 2.1; stroke-linecap: round; }
+	.jkr-item-question { font-family: 'Space Grotesk', sans-serif; font-size: 38px; line-height: 1; }
+	.jkr-control-item-art { width: 34px; height: 34px; display: grid; place-items: center; }
+	.jkr-control-item-art .jkr-item-art { width: 36px; height: 36px; }
+	.jkr-control-item-art .jkr-item-question { font-size: 24px; }
 
 	.jkr-countdown { position: absolute; z-index: 15; inset: 0; display: grid; place-items: center; pointer-events: none; }
 	.jkr-countdown span { min-width: 150px; min-height: 150px; padding: 20px; display: grid; place-items: center; border-radius: 50%; color: #0a1125; background: #d6f247; box-shadow: 0 12px 0 #829600, 0 0 0 14px rgba(214,242,71,.14), 0 30px 70px rgba(0,0,0,.3); font-family: 'Space Grotesk', sans-serif; font-size: clamp(48px, 9vw, 94px); font-weight: 800; letter-spacing: -.07em; animation: jkrCountdown 420ms var(--ease) both; }
@@ -892,8 +1034,6 @@
 	.jkr-results-row small { color: #7f8aa2; text-transform: uppercase; letter-spacing: .11em; font-size: 8px; font-weight: 900; }
 	.jkr-results-row strong { overflow: hidden; color: white; font-family: 'Space Grotesk', sans-serif; font-size: 16px; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
 	.jkr-finish-modal .jkr-modal-actions { grid-template-columns: repeat(2, 1fr); }
-
-	.jkr-rotate { display: none; }
 
 	@keyframes jkrRise { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: translateY(0); } }
 	@keyframes jkrPanelIn { from { opacity: 0; transform: translateX(24px) scale(.97); } to { opacity: 1; transform: translateX(0) scale(1); } }
@@ -952,8 +1092,10 @@
 		.race-active .jkr-item-slot .jkr-item-icon { width: 50px; height: 50px; transform: scale(.72); }
 		.jkr-touch-controls { position: absolute; z-index: 18; inset: auto max(14px, env(safe-area-inset-right)) max(13px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left)); display: flex; align-items: end; justify-content: space-between; pointer-events: none; }
 		.jkr-steer-controls, .jkr-action-controls { display: flex; align-items: end; gap: 9px; pointer-events: auto; }
+		.jkr-dpad-up, .jkr-dpad-down, .jkr-dpad-center { display: none; }
 		.jkr-touch-controls button { cursor: pointer; border: 0; display: grid; place-items: center; color: white; background: rgba(9,14,32,.72); box-shadow: inset 0 0 0 2px rgba(255,255,255,.17), 0 7px 0 rgba(2,5,14,.55); font-family: 'Space Grotesk', sans-serif; font-size: 9px; font-weight: 900; touch-action: none; transition-property: transform, background-color, box-shadow; transition-duration: 100ms; }
 		.jkr-touch-controls button:active { transform: translateY(5px) scale(.96); box-shadow: inset 0 0 0 2px rgba(255,255,255,.2), 0 2px 0 rgba(2,5,14,.55); }
+		.jkr-touch-controls button:disabled { cursor: default; opacity: .58; }
 		.jkr-steer-controls button { width: 62px; height: 62px; border-radius: 20px; }
 		.jkr-action-controls { position: relative; padding-right: 4px; }
 		.jkr-action-controls .jkr-touch-go { width: 74px; height: 74px; border-radius: 50%; color: #0a1125; background: #d6f247; box-shadow: inset 0 0 0 2px rgba(255,255,255,.3), 0 7px 0 #829600; font-size: 16px; }
@@ -961,7 +1103,21 @@
 		.jkr-action-controls .jkr-touch-brake { width: 48px; height: 48px; border-radius: 16px; }
 		.jkr-action-controls .jkr-touch-item { position: absolute; right: 58px; bottom: 67px; width: 45px; height: 45px; border-radius: 50%; color: #0a1125; background: #ffd45a; box-shadow: inset 0 0 0 2px rgba(255,255,255,.3), 0 5px 0 #aa7800; }
 		.jkr-action-controls .jkr-touch-item.ready { background: #d6f247; box-shadow: inset 0 0 0 2px rgba(255,255,255,.4), 0 5px 0 #829600, 0 0 19px rgba(214,242,71,.42); animation: jkrItemReady 800ms ease-in-out infinite alternate; }
-		.jkr-touch-question, .jkr-touch-banana { font-size: 19px; font-weight: 900; }
+		.jkr-control-item-art { transform: scale(.78); }
+	}
+
+	@media (pointer: coarse) and (orientation: landscape) and (max-width: 760px) {
+		.jkr-select {
+			padding-left: calc(env(safe-area-inset-left, 0px) + 12px);
+			padding-right: calc(env(safe-area-inset-right, 0px) + 12px);
+			grid-template-columns: minmax(180px, .62fr) minmax(300px, 1fr);
+			gap: 12px;
+		}
+		.jkr-title-block h1 { font-size: clamp(45px, 10.5vw, 62px); }
+		.jkr-kicker { font-size: 8px; }
+		.jkr-course-picker { min-width: 0; }
+		.jkr-course-option { padding-right: 82px; }
+		.jkr-course-art { right: -4px; width: 88px; }
 	}
 
 	@media (max-height: 420px) and (pointer: coarse) and (orientation: landscape) {
@@ -979,19 +1135,187 @@
 	}
 
 	@media (orientation: portrait) and (max-width: 900px) {
-		.jkr-rotate { position: absolute; z-index: 100; inset: 0; padding: 36px; display: flex; flex-direction: column; align-items: center; justify-content: center; color: white; background: radial-gradient(circle at 50% 30%, #21184c, #070b19 64%); text-align: center; }
-		.jkr-phone { width: 58px; height: 96px; margin-bottom: 18px; padding: 6px; border: 3px solid #d6f247; border-radius: 13px; transform: rotate(-16deg); animation: jkrRotatePhone 1.8s var(--ease) infinite; }
-		.jkr-phone span { width: 100%; height: 100%; display: block; border-radius: 7px; background: linear-gradient(150deg, #8d75ff, #101a33); }
-		.jkr-rotate-icon { display: grid; color: #d6f247; }
-		.jkr-rotate strong { margin-top: 20px; font-family: 'Space Grotesk', sans-serif; font-size: 26px; letter-spacing: -.035em; }
-		.jkr-rotate p { max-width: 290px; margin-top: 9px; color: #9ca7bd; line-height: 1.45; }
+		.jkr-shell {
+			min-width: 0;
+			padding: calc(env(safe-area-inset-top, 0px) + 8px) calc(env(safe-area-inset-right, 0px) + 12px) calc(env(safe-area-inset-bottom, 0px) + 10px) calc(env(safe-area-inset-left, 0px) + 12px);
+			display: grid;
+			grid-template-rows: 44px auto minmax(0, 1fr);
+			gap: 10px;
+			background:
+				radial-gradient(circle at 12% 9%, rgba(214,242,71,.11), transparent 20%),
+				radial-gradient(circle at 88% 78%, rgba(141,117,255,.18), transparent 26%),
+				linear-gradient(155deg, #202945, #111831 58%, #1a2140);
+		}
+
+		.jkr-topbar {
+			position: relative;
+			z-index: 20;
+			grid-row: 1;
+			left: auto;
+			right: auto;
+			top: auto;
+			min-height: 44px;
+			padding: 0;
+			grid-template-columns: 1fr auto;
+			gap: 10px;
+		}
+		.jkr-brand { min-height: 44px; gap: 9px; font-size: 14px; }
+		.jkr-brand-mark { width: 35px; height: 35px; border-radius: 11px; box-shadow: 0 4px 0 #829600; }
+		.jkr-course-chip { display: none; }
+		.jkr-top-actions { grid-column: 2; gap: 7px; }
+		.jkr-icon-button, .jkr-music { min-height: 44px; }
+		.jkr-music { width: 44px; padding: 0; justify-content: center; border-radius: 13px; }
+		.jkr-music span { display: none; }
+
+		.jkr-screen-frame {
+			position: relative;
+			z-index: 2;
+			grid-row: 2;
+			inset: auto;
+			width: min(100%, 520px);
+			aspect-ratio: 4 / 3;
+			justify-self: center;
+			min-height: 0;
+			box-sizing: border-box;
+			overflow: hidden;
+			border: 8px solid #0d1329;
+			border-bottom-width: 14px;
+			border-radius: 24px;
+			background: #030716;
+			box-shadow: inset 0 0 0 1px rgba(255,255,255,.1), 0 7px 0 #070b19, 0 17px 35px rgba(0,0,0,.28);
+		}
+		.jkr-vignette { background: linear-gradient(0deg, rgba(3,5,14,.9), transparent 58%), linear-gradient(90deg, rgba(3,5,14,.38), transparent 45%); }
+		.race-active .jkr-vignette { background: radial-gradient(circle at 50% 43%, transparent 40%, rgba(2,4,13,.18) 76%, rgba(2,4,13,.48) 100%); }
+
+		.jkr-select {
+			position: absolute;
+			inset: 0;
+			min-height: 0;
+			padding: 0;
+			display: block;
+		}
+		.jkr-select > .jkr-course-picker { display: none; }
+		.jkr-title-block { position: absolute; z-index: 4; left: 15px; right: 15px; bottom: 14px; max-width: none; padding: 0; }
+		.jkr-kicker { gap: 7px; font-size: 7px; letter-spacing: .14em; }
+		.jkr-kicker span { width: 17px; }
+		.jkr-title-block h1 { margin-top: 7px; font-size: clamp(38px, 12vw, 54px); line-height: .82; letter-spacing: -.067em; }
+		.jkr-title-block h1 span { display: inline; color: #d6f247; font-size: 1em; letter-spacing: inherit; }
+		.jkr-key-legend { display: none; }
+
+		.jkr-mobile-course-deck {
+			position: relative;
+			z-index: 4;
+			grid-row: 3;
+			width: min(100%, 520px);
+			min-height: 0;
+			justify-self: center;
+			display: block;
+			overflow-y: auto;
+			overscroll-behavior: contain;
+			touch-action: pan-y;
+			padding: 2px 2px 8px;
+			scrollbar-width: none;
+		}
+		.jkr-mobile-course-deck::-webkit-scrollbar { display: none; }
+		.jkr-mobile-course-deck .jkr-course-picker { padding: 10px; border-radius: 22px; background: rgba(7,10,24,.67); box-shadow: inset 0 0 0 1px rgba(255,255,255,.11), 0 14px 30px rgba(0,0,0,.2); }
+		.jkr-mobile-course-deck .jkr-picker-heading { min-height: 29px; padding: 0 4px 3px; font-size: 8px; }
+		.jkr-mobile-course-deck .jkr-course-list { gap: 7px; }
+		.jkr-mobile-course-deck .jkr-course-option { min-height: 68px; padding: 9px 76px 9px 41px; border-radius: 14px; }
+		.jkr-mobile-course-deck .jkr-course-number { left: 12px; top: 13px; font-size: 10px; }
+		.jkr-mobile-course-deck .jkr-course-copy small { font-size: 7px; }
+		.jkr-mobile-course-deck .jkr-course-copy strong { margin-top: 3px; font-size: 17px; }
+		.jkr-mobile-course-deck .jkr-course-copy > span { display: none; }
+		.jkr-mobile-course-deck .jkr-course-art { right: -3px; top: 50%; width: 78px; height: 50px; }
+		.jkr-mobile-course-deck .jkr-select-dot { right: 9px; top: 9px; width: 14px; height: 14px; }
+		.jkr-mobile-course-deck .jkr-start { min-height: 50px; margin-top: 8px; border-radius: 15px; font-size: 12px; box-shadow: 0 5px 0 #829600, 0 11px 22px rgba(0,0,0,.2); }
+
+		.jkr-hud { left: 7px; top: 7px; gap: 4px; }
+		.jkr-hud > div { min-height: 39px; padding: 5px 8px; border-radius: 10px; }
+		.jkr-hud span { font-size: 6px; }
+		.jkr-rank-block strong { font-size: 21px; }
+		.jkr-rank-block span { margin-top: 2px; }
+		.jkr-lap-block strong { margin-top: 1px; font-size: 16px; }
+		.jkr-time-block { min-width: 74px; }
+		.jkr-time-block strong { margin-top: 2px; font-size: 11px; }
+
+		.jkr-speedometer { right: 6px; bottom: 6px; width: 54px; padding-top: 4px; background: radial-gradient(circle, rgba(10,17,37,.86) 58%, rgba(167,221,237,.22) 61%, rgba(10,17,37,.78) 65%); }
+		.jkr-speedometer :global(svg) { width: 12px; height: 12px; }
+		.jkr-speedometer strong { font-size: 17px; }
+		.jkr-speedometer span { margin-top: 2px; font-size: 5px; }
+		.jkr-boost-meter { bottom: 6px; width: 116px; padding: 6px 7px; border-radius: 9px; }
+		.jkr-boost-label { margin-bottom: 4px; font-size: 6px; }
+		.jkr-boost-label :global(svg) { width: 9px; height: 9px; }
+		.jkr-boost-track { height: 4px; }
+		.jkr-item-slot { left: 6px; bottom: 6px; width: 72px; min-height: 76px; padding: 5px; border-radius: 13px; }
+		.jkr-item-title { max-width: 62px; overflow: hidden; font-size: 6px; letter-spacing: .08em; text-overflow: ellipsis; white-space: nowrap; }
+		.jkr-item-icon { width: 47px; height: 47px; border-radius: 11px; }
+		.jkr-item-icon .jkr-item-art { width: 45px; height: 45px; }
+		.jkr-item-icon .jkr-item-question { font-size: 27px; }
+		.jkr-item-slot small { display: none; }
+		.jkr-countdown span { min-width: 88px; min-height: 88px; padding: 12px; font-size: 46px; box-shadow: 0 8px 0 #829600, 0 0 0 9px rgba(214,242,71,.14), 0 20px 45px rgba(0,0,0,.3); }
+
+		.jkr-touch-controls {
+			position: relative;
+			z-index: 6;
+			grid-row: 3;
+			width: min(100%, 520px);
+			min-height: 0;
+			padding: 8px 3px 4px;
+			justify-self: center;
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: 6px;
+			pointer-events: none;
+		}
+		.jkr-touch-controls button { cursor: pointer; border: 0; display: grid; place-items: center; color: #f7f8ff; background: #10162b; box-shadow: inset 0 0 0 2px rgba(255,255,255,.1), 0 6px 0 #070a17, 0 10px 17px rgba(0,0,0,.2); font-family: 'Space Grotesk', sans-serif; font-size: 8px; font-weight: 900; touch-action: none; transition: transform 90ms var(--ease), box-shadow 90ms var(--ease), filter 90ms var(--ease); }
+		.jkr-touch-controls button:active { transform: translateY(5px) scale(.97); box-shadow: inset 0 0 0 2px rgba(255,255,255,.12), 0 1px 0 #070a17; }
+		.jkr-touch-controls button:disabled { cursor: default; opacity: .46; filter: saturate(.45); }
+		.jkr-touch-controls button:focus-visible { outline: 3px solid #d6f247; outline-offset: 3px; }
+
+		.jkr-steer-controls { width: 144px; height: 144px; flex: 0 0 144px; display: grid; grid-template: repeat(3, 48px) / repeat(3, 48px); pointer-events: auto; filter: drop-shadow(0 8px 10px rgba(0,0,0,.2)); }
+		.jkr-steer-controls button { width: 48px; height: 48px; border-radius: 0; box-shadow: inset 0 0 0 2px rgba(255,255,255,.08), 0 4px 0 #070a17; }
+		.jkr-dpad-up { grid-area: 1 / 2; border-radius: 11px 11px 0 0 !important; }
+		.jkr-dpad-left { grid-area: 2 / 1; border-radius: 11px 0 0 11px !important; }
+		.jkr-dpad-center { grid-area: 2 / 2; display: block; position: relative; background: #10162b; box-shadow: inset 0 0 0 2px rgba(255,255,255,.08); }
+		.jkr-dpad-center::after { content: ''; position: absolute; inset: 15px; border-radius: 50%; background: #080d1d; box-shadow: inset 0 2px 0 rgba(255,255,255,.09); }
+		.jkr-dpad-right { grid-area: 2 / 3; border-radius: 0 11px 11px 0 !important; }
+		.jkr-dpad-down { grid-area: 3 / 2; border-radius: 0 0 11px 11px !important; }
+
+		.jkr-action-controls { position: relative; width: 150px; height: 144px; flex: 0 0 150px; pointer-events: auto; }
+		.jkr-action-controls button { position: absolute; border-radius: 50%; }
+		.jkr-action-controls .jkr-touch-go { right: 0; bottom: 3px; width: 76px; height: 76px; color: #0a1125; background: #d6f247; box-shadow: inset 0 0 0 2px rgba(255,255,255,.35), 0 7px 0 #829600, 0 12px 20px rgba(0,0,0,.22); font-size: 16px; }
+		.jkr-action-controls .jkr-touch-drift { left: 8px; top: 7px; width: 62px; height: 62px; color: #0a1125; background: #a7dded; box-shadow: inset 0 0 0 2px rgba(255,255,255,.35), 0 6px 0 #5f9eb1; font-size: 9px; }
+		.jkr-action-controls .jkr-touch-brake { left: 0; bottom: 2px; width: 49px; height: 49px; border-radius: 15px; }
+		.jkr-action-controls .jkr-touch-item { right: 15px; top: 0; width: 54px; height: 54px; color: #0a1125; background: #ffd45a; box-shadow: inset 0 0 0 2px rgba(255,255,255,.36), 0 5px 0 #aa7800; }
+		.jkr-action-controls .jkr-touch-item.ready { background: #d6f247; box-shadow: inset 0 0 0 2px rgba(255,255,255,.42), 0 5px 0 #829600, 0 0 18px rgba(214,242,71,.38); animation: jkrItemReady 800ms ease-in-out infinite alternate; }
+
+		.jkr-modal-wrap { position: fixed; inset: 0; padding: calc(env(safe-area-inset-top, 0px) + 16px) calc(env(safe-area-inset-right, 0px) + 12px) calc(env(safe-area-inset-bottom, 0px) + 16px) calc(env(safe-area-inset-left, 0px) + 12px); overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; }
+		.jkr-modal { width: min(390px, 100%); padding: 23px 20px; border-radius: 24px; }
+		.jkr-modal h2 { font-size: 39px; }
+		.jkr-modal > p:not(.jkr-modal-kicker) { margin-top: 10px; font-size: 13px; }
+		.jkr-modal-actions { margin-top: 18px; grid-template-columns: 1fr; gap: 8px; }
+		.jkr-modal-actions button { min-height: 50px; }
+		.jkr-finish-modal .jkr-modal-actions { grid-template-columns: repeat(2, 1fr); }
+		.jkr-trophy { width: 56px; height: 56px; margin: -51px auto 17px; }
+		.jkr-trophy :global(svg) { width: 31px; height: 31px; }
+		.jkr-results-row { margin-top: 18px; padding: 12px 0; }
+		.jkr-results-row span { padding: 0 7px; }
+		.jkr-results-row strong { font-size: 12px; }
+		.jkr-modal > a { margin-top: 13px; }
 	}
 
-	@keyframes jkrRotatePhone { 0%, 35% { transform: rotate(-16deg); } 65%, 100% { transform: rotate(74deg); } }
+	@media (orientation: portrait) and (max-width: 340px) {
+		.jkr-shell { padding-inline: calc(env(safe-area-inset-left, 0px) + 8px) calc(env(safe-area-inset-right, 0px) + 8px); }
+		.jkr-action-controls { width: 140px; flex-basis: 140px; transform: scale(.94); transform-origin: right center; }
+		.jkr-mobile-course-deck .jkr-course-option { padding-right: 67px; }
+		.jkr-mobile-course-deck .jkr-course-art { width: 69px; }
+	}
+
 	@keyframes jkrItemReady { from { transform: translateY(0); } to { transform: translateY(-3px); } }
 
 	@media (prefers-reduced-motion: reduce) {
-		.jkr-kicker, .jkr-title-block h1, .jkr-key-legend, .jkr-course-picker, .jkr-modal-wrap, .jkr-modal, .jkr-countdown span, .jkr-phone, .jkr-item-slot.roulette .jkr-item-icon, .jkr-action-controls .jkr-touch-item.ready { animation: none; }
+		.jkr-kicker, .jkr-title-block h1, .jkr-key-legend, .jkr-course-picker, .jkr-modal-wrap, .jkr-modal, .jkr-countdown span, .jkr-item-slot.roulette .jkr-item-icon, .jkr-action-controls .jkr-touch-item.ready { animation: none; }
 		.jkr-course-option, .jkr-course-art, .jkr-start, .jkr-brand, .jkr-icon-button, .jkr-music, .jkr-modal-actions button, .jkr-modal > a { transition-duration: .01ms; }
 	}
 </style>

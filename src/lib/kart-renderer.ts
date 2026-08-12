@@ -1102,21 +1102,22 @@ function drawTurtleShell(
 	const seed = hashId(projectile.id);
 	const scale = projected.scale;
 	const red = projectile.type === 'red-shell';
-	const size = 45 * scale;
+	const size = 49 * scale;
 	const motion = state.reducedMotion ? 0 : state.time;
 	const spin = projectile.spin ?? motion * (red ? 7.4 : 9.3) + seed * 0.0008;
 	const hop = state.reducedMotion ? 0 : Math.abs(Math.sin(motion * 9.5 + seed)) * size * 0.08;
 	const heading = Math.max(-1, Math.min(1, projectile.heading ?? 0));
-	const shellColor = red ? '#ef3857' : '#31c86b';
-	const shellDark = red ? '#871f3a' : '#12683c';
+	const shellColor = red ? '#f0445d' : '#2fc873';
+	const shellLight = red ? '#ff7b83' : '#66e59a';
+	const shellDark = red ? '#7f2035' : '#12643c';
 
 	context.save();
-	context.translate(projected.x, projected.y - size * 0.42 - hop);
+	context.translate(projected.x, projected.y - size * 0.44 - hop);
 	context.rotate(heading * 0.13);
 
 	context.fillStyle = 'rgba(3, 7, 20, .35)';
 	context.beginPath();
-	context.ellipse(0, size * 0.46 + hop, size * 0.54, size * 0.15, 0, 0, TAU);
+	context.ellipse(0, size * 0.5 + hop, size * 0.61, size * 0.16, 0, 0, TAU);
 	context.fill();
 
 	if (!state.reducedMotion) {
@@ -1133,51 +1134,88 @@ function drawTurtleShell(
 	if (red) {
 		const pulse = state.reducedMotion ? 0.34 : 0.24 + Math.sin(motion * 8 + seed) * 0.08;
 		context.strokeStyle = `rgba(255, 90, 112, ${pulse})`;
-		context.lineWidth = Math.max(1, 2 * scale);
+		context.lineWidth = Math.max(1, 2.4 * scale);
 		context.beginPath();
-		context.ellipse(0, 0, size * 0.74, size * 0.54, 0, 0, TAU);
+		context.ellipse(0, 0, size * 0.78, size * 0.62, 0, 0, TAU);
 		context.stroke();
 	}
 
-	context.fillStyle = '#f3dfad';
+	// The pale peripheral tabs and thick rim carry the turtle-shell silhouette
+	// even when the item is only a few pixels wide in the distance.
+	context.fillStyle = '#fff3d1';
 	context.strokeStyle = '#151c31';
-	context.lineWidth = Math.max(1, 3 * scale);
+	context.lineWidth = Math.max(1, 2.8 * scale);
+	for (const detail of [
+		{ x: -0.5, y: -0.03, angle: -0.24 },
+		{ x: 0.5, y: -0.03, angle: 0.24 },
+		{ x: -0.27, y: 0.39, angle: -0.12 },
+		{ x: 0.27, y: 0.39, angle: 0.12 }
+	]) {
+		context.save();
+		context.translate(detail.x * size, detail.y * size);
+		context.rotate(detail.angle);
+		context.beginPath();
+		context.moveTo(-size * 0.17, -size * 0.1);
+		context.quadraticCurveTo(0, -size * 0.2, size * 0.17, -size * 0.1);
+		context.lineTo(size * 0.12, size * 0.13);
+		context.quadraticCurveTo(0, size * 0.2, -size * 0.12, size * 0.13);
+		context.closePath();
+		context.fill();
+		context.stroke();
+		context.restore();
+	}
+
+	const rimGradient = context.createLinearGradient(0, -size * 0.5, 0, size * 0.48);
+	rimGradient.addColorStop(0, '#fff9df');
+	rimGradient.addColorStop(1, '#d9c79b');
+	context.fillStyle = rimGradient;
 	context.beginPath();
-	context.ellipse(0, 0, size * 0.54, size * 0.43, 0, 0, TAU);
+	context.ellipse(0, 0, size * 0.58, size * 0.48, 0, 0, TAU);
 	context.fill();
 	context.stroke();
 
 	context.save();
 	context.beginPath();
-	context.ellipse(0, 0, size * 0.45, size * 0.35, 0, 0, TAU);
+	context.ellipse(0, -size * 0.025, size * 0.47, size * 0.385, 0, 0, TAU);
 	context.clip();
-	context.fillStyle = shellColor;
-	context.fillRect(-size * 0.5, -size * 0.4, size, size * 0.8);
+	const dome = context.createRadialGradient(-size * 0.18, -size * 0.2, size * 0.02, 0, 0, size * 0.52);
+	dome.addColorStop(0, shellLight);
+	dome.addColorStop(0.58, shellColor);
+	dome.addColorStop(1, shellDark);
+	context.fillStyle = dome;
+	context.fillRect(-size * 0.5, -size * 0.45, size, size * 0.9);
 	context.rotate(spin);
 	context.strokeStyle = shellDark;
-	context.lineWidth = Math.max(1, 2.1 * scale);
+	context.lineWidth = Math.max(1, 2.6 * scale);
+	context.lineJoin = 'round';
+	const plateRadius = size * 0.19;
 	context.beginPath();
-	for (let index = 0; index < 6; index++) {
-		const angle = (index / 6) * TAU - Math.PI / 2;
-		const pointX = Math.cos(angle) * size * 0.19;
-		const pointY = Math.sin(angle) * size * 0.19;
+	for (let index = 0; index < 5; index++) {
+		const angle = (index / 5) * TAU - Math.PI / 2;
+		const pointX = Math.cos(angle) * plateRadius;
+		const pointY = Math.sin(angle) * plateRadius;
 		if (index === 0) context.moveTo(pointX, pointY);
 		else context.lineTo(pointX, pointY);
 	}
 	context.closePath();
 	context.stroke();
-	for (let index = 0; index < 6; index++) {
-		const angle = (index / 6) * TAU - Math.PI / 2;
+	for (let index = 0; index < 5; index++) {
+		const angle = (index / 5) * TAU - Math.PI / 2;
 		context.beginPath();
-		context.moveTo(Math.cos(angle) * size * 0.19, Math.sin(angle) * size * 0.19);
-		context.lineTo(Math.cos(angle) * size * 0.49, Math.sin(angle) * size * 0.39);
+		context.moveTo(Math.cos(angle) * plateRadius, Math.sin(angle) * plateRadius);
+		context.lineTo(Math.cos(angle) * size * 0.5, Math.sin(angle) * size * 0.42);
 		context.stroke();
 	}
 	context.restore();
-
-	context.fillStyle = 'rgba(255,255,255,.48)';
+	context.strokeStyle = 'rgba(255,255,255,.8)';
+	context.lineWidth = Math.max(1, 1.7 * scale);
 	context.beginPath();
-	context.ellipse(-size * 0.18, -size * 0.15, size * 0.13, size * 0.06, -0.45, 0, TAU);
+	context.arc(-size * 0.015, -size * 0.015, size * 0.47, Math.PI * 1.08, Math.PI * 1.73);
+	context.stroke();
+
+	context.fillStyle = 'rgba(255,255,255,.64)';
+	context.beginPath();
+	context.ellipse(-size * 0.19, -size * 0.18, size * 0.13, size * 0.065, -0.45, 0, TAU);
 	context.fill();
 	context.restore();
 }
@@ -1190,50 +1228,84 @@ function drawBananaPeel(
 ) {
 	const seed = hashId(banana.id);
 	const scale = projected.scale;
-	const size = 42 * scale;
+	const size = 48 * scale;
 	const sway = state.reducedMotion ? 0 : Math.sin(state.time * 3.2 + seed) * 0.07;
 
 	context.save();
 	context.translate(projected.x, projected.y - size * 0.32);
 	context.rotate(sway);
-	context.fillStyle = 'rgba(3, 7, 20, .32)';
+	context.fillStyle = 'rgba(3, 7, 20, .34)';
 	context.beginPath();
-	context.ellipse(0, size * 0.36, size * 0.58, size * 0.13, 0, 0, TAU);
+	context.ellipse(0, size * 0.38, size * 0.63, size * 0.14, 0, 0, TAU);
 	context.fill();
 
-	context.strokeStyle = '#9b6810';
-	context.lineWidth = Math.max(1, 8 * scale);
+	context.strokeStyle = '#5e4315';
+	context.lineWidth = Math.max(1, 2.7 * scale);
 	context.lineCap = 'round';
 	context.lineJoin = 'round';
-	context.fillStyle = '#ffd83f';
-	for (const side of [-1, 1]) {
+
+	// Three separated flaps form one high-contrast tripod instead of merging
+	// into a yellow blob once perspective makes the item small.
+	for (const flap of [
+		{ side: -1, color: '#ffc82f', inner: -0.05 },
+		{ side: 1, color: '#ffe04a', inner: 0.05 }
+	]) {
+		const side = flap.side;
+		context.fillStyle = flap.color;
 		context.beginPath();
-		context.moveTo(0, -size * 0.15);
-		context.quadraticCurveTo(side * size * 0.08, size * 0.13, side * size * 0.49, size * 0.23);
-		context.quadraticCurveTo(side * size * 0.34, size * 0.34, side * size * 0.03, size * 0.11);
+		context.moveTo(flap.inner * size, -size * 0.13);
+		context.quadraticCurveTo(side * size * 0.12, size * 0.08, side * size * 0.57, size * 0.25);
+		context.quadraticCurveTo(side * size * 0.45, size * 0.42, side * size * 0.17, size * 0.34);
+		context.quadraticCurveTo(side * size * 0.04, size * 0.21, flap.inner * size, -size * 0.13);
 		context.closePath();
 		context.fill();
 		context.stroke();
+		context.fillStyle = '#6e4814';
+		context.beginPath();
+		context.ellipse(side * size * 0.55, size * 0.26, size * 0.07, size * 0.045, side * 0.28, 0, TAU);
+		context.fill();
 	}
+
+	context.fillStyle = '#f4b91f';
 	context.beginPath();
-	context.moveTo(0, -size * 0.12);
-	context.quadraticCurveTo(size * 0.05, size * 0.1, 0, size * 0.36);
-	context.quadraticCurveTo(-size * 0.14, size * 0.23, -size * 0.09, -size * 0.04);
+	context.moveTo(0, -size * 0.14);
+	context.quadraticCurveTo(size * 0.12, size * 0.06, size * 0.08, size * 0.48);
+	context.quadraticCurveTo(-size * 0.04, size * 0.55, -size * 0.15, size * 0.38);
+	context.quadraticCurveTo(-size * 0.12, size * 0.1, 0, -size * 0.14);
 	context.closePath();
 	context.fill();
 	context.stroke();
-
-	context.strokeStyle = '#ffd83f';
-	context.lineWidth = Math.max(1, 6 * scale);
+	context.fillStyle = '#674516';
 	context.beginPath();
-	context.moveTo(0, -size * 0.1);
-	context.quadraticCurveTo(-size * 0.03, -size * 0.31, size * 0.05, -size * 0.45);
+	context.ellipse(size * 0.06, size * 0.47, size * 0.07, size * 0.045, 0.12, 0, TAU);
+	context.fill();
+
+	context.fillStyle = '#fff0a7';
+	context.strokeStyle = '#7b561a';
+	context.lineWidth = Math.max(1, 2.2 * scale);
+	context.beginPath();
+	context.ellipse(0, -size * 0.105, size * 0.16, size * 0.12, 0, 0, TAU);
+	context.fill();
 	context.stroke();
-	context.strokeStyle = '#2a2430';
+
+	context.strokeStyle = '#ffdc3d';
+	context.lineWidth = Math.max(1, 6.5 * scale);
+	context.beginPath();
+	context.moveTo(0, -size * 0.14);
+	context.quadraticCurveTo(-size * 0.04, -size * 0.34, size * 0.04, -size * 0.49);
+	context.stroke();
+	context.strokeStyle = '#3a2a21';
 	context.lineWidth = Math.max(1, 3 * scale);
 	context.beginPath();
-	context.moveTo(size * 0.03, -size * 0.43);
-	context.lineTo(size * 0.08, -size * 0.49);
+	context.moveTo(size * 0.025, -size * 0.47);
+	context.lineTo(size * 0.085, -size * 0.54);
+	context.stroke();
+
+	context.strokeStyle = 'rgba(255,255,255,.58)';
+	context.lineWidth = Math.max(1, 1.3 * scale);
+	context.beginPath();
+	context.moveTo(-size * 0.04, -size * 0.06);
+	context.quadraticCurveTo(-size * 0.22, size * 0.12, -size * 0.47, size * 0.23);
 	context.stroke();
 	context.restore();
 }

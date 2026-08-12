@@ -18,6 +18,7 @@
 	let activeMusicTheme: MusicTheme = 'menu';
 	let musicRequested = true;
 	let musicPlaybackId = 0;
+	let gameVisualReady = false;
 
 	onMount(() => {
 		musicPlayers = {
@@ -36,7 +37,7 @@
 		} catch {
 			// Private browsing can block storage without blocking the game.
 		}
-		void playMusicTheme('menu');
+		if (gameVisualReady) void playMusicTheme('menu');
 	});
 
 	onDestroy(() => {
@@ -72,6 +73,7 @@
 				if (playerTheme !== theme) player.pause();
 			}
 		}
+		if (!gameVisualReady) return;
 
 		if (!musicRequested) {
 			musicStatus = 'off';
@@ -92,7 +94,6 @@
 			return;
 		}
 
-		musicStatus = 'playing';
 		try {
 			await player.play();
 			if (playbackId !== musicPlaybackId || theme !== activeMusicTheme) {
@@ -105,6 +106,12 @@
 		}
 	}
 
+	function handleVisualReady() {
+		if (gameVisualReady) return;
+		gameVisualReady = true;
+		void playMusicTheme(activeMusicTheme);
+	}
+
 	function switchMusicTheme(theme: MusicTheme) {
 		void musicPlayers?.[theme].unlock().catch(() => {
 			// A later tap on the music control can retry if the browser blocks this gesture.
@@ -115,7 +122,13 @@
 	function toggleBackgroundMusic() {
 		const player = musicPlayers?.[activeMusicTheme];
 		if (!player || musicStatus === 'unavailable') return;
-		if (musicStatus === 'playing' || musicStatus === 'loading') {
+		if (musicStatus === 'loading') {
+			void player.unlock().catch(() => {
+				musicStatus = 'off';
+			});
+			return;
+		}
+		if (musicStatus === 'playing') {
 			musicRequested = false;
 			musicPlaybackId += 1;
 			player.pause();
@@ -136,11 +149,11 @@
 			void playMusicTheme(activeMusicTheme);
 			return;
 		}
-		if (musicStatus === 'playing') {
-			void player.unlock().catch(() => {
-				// The game music button stays available if this gesture is rejected.
-			});
-		}
+		// iOS may leave an autoplay resume pending in the loading state. Always
+		// pass the next trusted gesture through to the active AudioContext.
+		void player.unlock().catch(() => {
+			// The game music button stays available if this gesture is rejected.
+		});
 	}
 
 	function handleAudioUnlock(event: PointerEvent) {
@@ -151,8 +164,8 @@
 </script>
 
 <svelte:head>
-	<title>Javier Grand Prix | Multiply Mission</title>
-	<meta name="description" content="A secret two-course browser kart racer built for Javier." />
+	<title>Grand Prix | Multiply Mission</title>
+	<meta name="description" content="A secret two-course browser kart racer." />
 	<meta name="theme-color" content="#070b19" />
 	<meta name="robots" content="noindex" />
 </svelte:head>
@@ -164,4 +177,5 @@
 	onToggleMusic={toggleBackgroundMusic}
 	onAudioGesture={unlockMusic}
 	onMusicThemeChange={switchMusicTheme}
+	onVisualReady={handleVisualReady}
 />
