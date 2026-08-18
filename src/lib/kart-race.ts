@@ -1,3 +1,5 @@
+import { getCourseMapPoint } from './kart-course-layout';
+
 export type KartTrackId = 'prism-circuit' | 'sunset-galleria';
 export type RacePhase = 'countdown' | 'racing' | 'finished';
 export type KartItem = 'green-shell' | 'red-shell' | 'banana';
@@ -40,6 +42,7 @@ export type KartState = {
 	lap: number;
 	rank: number;
 	item: KartItem | null;
+	heldItem: KartItem | null;
 	roulette: RouletteState;
 	drift: {
 		active: boolean;
@@ -144,6 +147,8 @@ export type RaceEvent =
 	| { type: 'roulette-tick'; racerId: string; item: KartItem; index: number }
 	| { type: 'roulette-award'; racerId: string; item: KartItem }
 	| { type: 'item'; item: KartItem; racerId: string }
+	| { type: 'item-hold'; item: KartItem; racerId: string }
+	| { type: 'item-block'; defenseItem: KartItem; incomingItem: 'green-shell' | 'red-shell' }
 	| { type: 'item-use'; item: KartItem; racerId: string }
 	| { type: 'projectile-bounce'; id: string; ownerId: string }
 	| { type: 'item-hit'; item: KartItem; targetId: string; ownerId: string }
@@ -197,16 +202,23 @@ export type TrackPose = {
 
 const fixedStep = 1 / 60;
 const rouletteItems: readonly KartItem[] = ['green-shell', 'red-shell', 'banana'];
+const kartContactLength = 0.0105;
+const kartContactWidth = 0.36;
+const kartContactReleaseLength = 0.015;
+const kartContactReleaseWidth = 0.48;
+const kartBumpCooldown = 0.28;
+const bananaDropDistance = 0.014;
+const heldItemDistance = 0.0062;
 const mallObstacleHitPulse = 0.46;
 const mallObstaclePattern = [
-	{ type: 'kiosk', progress: 0.155, lane: -0.58, radius: 0.26 },
-	{ type: 'planter', progress: 0.255, lane: 0.52, radius: 0.22 },
-	{ type: 'bench', progress: 0.35, lane: -0.48, radius: 0.25 },
-	{ type: 'kiosk', progress: 0.445, lane: 0.58, radius: 0.26 },
-	{ type: 'planter', progress: 0.555, lane: -0.56, radius: 0.22 },
-	{ type: 'bench', progress: 0.655, lane: 0.48, radius: 0.25 },
-	{ type: 'kiosk', progress: 0.765, lane: -0.5, radius: 0.26 },
-	{ type: 'planter', progress: 0.865, lane: 0.56, radius: 0.22 }
+	{ type: 'kiosk', progress: 0.1, lane: -0.58, radius: 0.26 },
+	{ type: 'planter', progress: 0.19, lane: 0.52, radius: 0.22 },
+	{ type: 'bench', progress: 0.32, lane: -0.48, radius: 0.25 },
+	{ type: 'kiosk', progress: 0.46, lane: 0.58, radius: 0.26 },
+	{ type: 'planter', progress: 0.55, lane: -0.56, radius: 0.22 },
+	{ type: 'bench', progress: 0.64, lane: 0.48, radius: 0.25 },
+	{ type: 'kiosk', progress: 0.76, lane: -0.5, radius: 0.26 },
+	{ type: 'planter', progress: 0.87, lane: 0.56, radius: 0.22 }
 ] as const satisfies readonly Omit<MallObstacleState, 'id' | 'cooldown'>[];
 const rivalProfiles = [
 	{ name: 'Mochi', color: '#49d2a7', skill: 0.72, difficulty: 'easy' },
@@ -239,7 +251,7 @@ export const kartTracks: Record<KartTrackId, TrackDefinition> = {
 		braking: 0.1,
 		rollingDrag: 0.018,
 		steering: 1.31,
-		boostPads: [0.128, 0.412, 0.668, 0.884]
+		boostPads: [0.075, 0.238, 0.535, 0.675, 0.91]
 	}
 };
 
@@ -253,8 +265,10 @@ export function createRaceState(
 	const player = createKart('player', 0, 0);
 	player.rank = 8;
 	const rivals = rivalProfiles.map((profile, index): RivalState => {
-		const laneSign = index % 2 === 0 ? -1 : 1;
-		const kart = createKart(`rival-${index + 1}`, 0.004 + index * 0.003, laneSign * (0.14 + (index % 3) * 0.23));
+		const row = Math.floor(index / 2);
+		const isFinalSoloRow = index === rivalProfiles.length - 1;
+		const lane = isFinalSoloRow ? 0 : index % 2 === 0 ? -0.35 : 0.35;
+		const kart = createKart(`rival-${index + 1}`, 0.014 + row * 0.014, lane);
 		return {
 			...kart,
 			...profile,
@@ -265,7 +279,7 @@ export function createRaceState(
 		};
 	});
 
-	const rowProgress = trackId === 'prism-circuit' ? [0.16, 0.37, 0.59, 0.81] : [0.1, 0.3, 0.53, 0.74, 0.92];
+	const rowProgress = trackId === 'prism-circuit' ? [0.16, 0.37, 0.59, 0.81] : [0.08, 0.32, 0.5, 0.74, 0.9];
 	const pickupLanes = [-0.55, 0, 0.55];
 	const state: RaceState = {
 		track,
@@ -336,16 +350,17 @@ export function getRaceEvents(state: RaceState) {
 export function getTrackPose(trackOrId: TrackDefinition | KartTrackId, progress: number, lane = 0): TrackPose {
 	const track = typeof trackOrId === 'string' ? kartTracks[trackOrId] : trackOrId;
 	const wrapped = wrapUnit(progress);
-	const theta = wrapped * Math.PI * 2;
-	const curve = courseCurve(track.id, wrapped);
-	const radius = track.id === 'prism-circuit' ? 1 + Math.sin(theta * 3) * 0.12 : 1 + Math.sin(theta * 2 + 0.5) * 0.08;
+	const point = getCourseMapPoint(track.id, wrapped);
+	const normalizedX = (point.x - 50) / 43;
+	const normalizedY = (point.y - 37) / 30;
+	const lateralHeading = point.heading + Math.PI / 2;
 	return {
 		progress: wrapped,
 		lane,
-		x: Math.cos(theta) * radius + Math.cos(theta + Math.PI / 2) * lane * 0.12,
-		y: Math.sin(theta) * radius + Math.sin(theta + Math.PI / 2) * lane * 0.12,
-		heading: theta + Math.PI / 2 + curve * 0.12,
-		curve
+		x: normalizedX + Math.cos(lateralHeading) * lane * 0.12,
+		y: normalizedY + Math.sin(lateralHeading) * lane * 0.12,
+		heading: point.heading,
+		curve: point.curve
 	};
 }
 
@@ -444,9 +459,11 @@ function stepPlayer(state: RaceState, input: RaceInput, delta: number) {
 		state.boostPadCooldown = 1.2;
 	}
 
-	const usedItem = input.useItem && !state.lastUseItem;
+	const heldItemPressed = input.useItem && !state.lastUseItem;
+	const heldItemReleased = !input.useItem && state.lastUseItem;
 	state.lastUseItem = input.useItem;
-	if (usedItem && player.item && !player.roulette.active) useItem(state, player, steer);
+	if (heldItemPressed && player.item && !player.roulette.active) holdItem(state, player);
+	if (heldItemReleased && player.heldItem) releaseHeldItem(state, player, steer);
 }
 
 function stepKartTimers(kart: KartState, delta: number) {
@@ -593,7 +610,7 @@ function stepPickupsAndHazards(state: RaceState, delta: number) {
 			continue;
 		}
 		for (const kart of allKarts(state)) {
-			if (kart.item || kart.roulette.active || kart.stun.remaining > 0) continue;
+			if (kart.item || kart.heldItem || kart.roulette.active || kart.stun.remaining > 0) continue;
 			if (Math.abs(signedDistance(kart.progress, pickup.progress)) < 0.0047 && Math.abs(kart.lane - pickup.lane) < 0.27) {
 				if (kart.id === 'player') {
 					pickup.active = false;
@@ -610,15 +627,15 @@ function stepPickupsAndHazards(state: RaceState, delta: number) {
 		const lateralGap = Math.abs(state.player.lane - rival.lane);
 		const contactIndex = state.rivalContacts.indexOf(rival.id);
 		if (contactIndex >= 0) {
-			// Do not treat one sustained side-by-side contact as a brand-new crash as
-			// soon as the stun timer expires. Re-arm only after the karts separate.
-			if (longitudinalGap > 0.008 || lateralGap > 0.42) state.rivalContacts.splice(contactIndex, 1);
+			// Re-arm only after the kart bodies have visibly separated.
+			if (longitudinalGap > kartContactReleaseLength || lateralGap > kartContactReleaseWidth) {
+				state.rivalContacts.splice(contactIndex, 1);
+			}
 			continue;
 		}
 		if (state.player.collisionCooldown > 0 || rival.collisionCooldown > 0) continue;
-		if (longitudinalGap < 0.003 && lateralGap < 0.2) {
-			applyKartHit(state, state.player, 'rival', rival.lane);
-			applyKartHit(state, rival, 'rival', state.player.lane);
+		if (longitudinalGap < kartContactLength && lateralGap < kartContactWidth) {
+			applyKartBump(state, rival);
 			state.rivalContacts.push(rival.id);
 		}
 	}
@@ -634,8 +651,8 @@ function useItem(state: RaceState, owner: KartState, steer: number) {
 		state.bananas.push({
 			id: `banana-${state.nextWorldItemId++}`,
 			ownerId: owner.id,
-			distance: owner.distance - 0.007,
-			progress: wrapUnit(owner.distance - 0.007),
+			distance: owner.distance - bananaDropDistance,
+			progress: wrapUnit(owner.distance - bananaDropDistance),
 			lane: clamp(owner.lane, -0.92, 0.92),
 			age: 0
 		});
@@ -655,6 +672,22 @@ function useItem(state: RaceState, owner: KartState, steer: number) {
 		age: 0,
 		bounces: 0
 	});
+}
+
+function holdItem(state: RaceState, owner: KartState) {
+	const item = owner.item;
+	if (!item || owner.heldItem) return;
+	owner.item = null;
+	owner.heldItem = item;
+	state.events.push({ type: 'item-hold', item, racerId: owner.id });
+}
+
+function releaseHeldItem(state: RaceState, owner: KartState, steer: number) {
+	const item = owner.heldItem;
+	if (!item) return;
+	owner.heldItem = null;
+	owner.item = item;
+	useItem(state, owner, steer);
 }
 
 function stepWorldItems(state: RaceState, delta: number) {
@@ -685,9 +718,19 @@ function stepWorldItems(state: RaceState, delta: number) {
 		let hit = false;
 		if (shell.age > 0.1) {
 			for (const kart of allKarts(state)) {
-				if (kart.id === shell.ownerId || kart.collisionCooldown > 0) continue;
+				if (kart.id === shell.ownerId) continue;
 				if (Math.abs(kart.distance - shell.distance) < 0.0067 && Math.abs(kart.lane - shell.lane) < 0.22) {
-					applyItemHit(state, kart, shell.type, shell.ownerId, shell.lane);
+					if (
+						kart.id === 'player' &&
+						kart.heldItem &&
+						shell.distance <= kart.distance + 0.002
+					) {
+						blockShellWithHeldItem(state, kart, shell.type);
+					} else if (kart.collisionCooldown <= 0) {
+						applyItemHit(state, kart, shell.type, shell.ownerId, shell.lane);
+					} else {
+						continue;
+					}
 					hit = true;
 					break;
 				}
@@ -738,14 +781,26 @@ function applyItemHit(state: RaceState, target: KartState, item: KartItem, owner
 	state.events.push({ type: 'item-hit', item, targetId: target.id, ownerId });
 }
 
+function blockShellWithHeldItem(
+	state: RaceState,
+	target: KartState,
+	incomingItem: 'green-shell' | 'red-shell'
+) {
+	const defenseItem = target.heldItem;
+	if (!defenseItem) return;
+	target.heldItem = null;
+	addImpact(state, target.distance - heldItemDistance, target.lane, '#baf5ff', 0.38);
+	state.events.push({ type: 'item-block', defenseItem, incomingItem });
+}
+
 function applyKartHit(
 	state: RaceState,
 	target: KartState,
-	source: 'rival' | 'obstacle' | 'item',
+	source: 'obstacle' | 'item',
 	obstacleLane: number,
 	item?: KartItem
 ) {
-	target.speed *= source === 'rival' ? 0.58 : 0.4;
+	target.speed *= 0.4;
 	target.boost.remaining = 0;
 	target.drift.active = false;
 	target.drift.charge = 0;
@@ -758,14 +813,35 @@ function applyKartHit(
 	if (target.id === 'player') state.events.push({ type: 'hit', source, ...(item ? { item } : {}) });
 }
 
-function addImpact(state: RaceState, distance: number, lane: number, color: string) {
+function applyKartBump(state: RaceState, rival: RivalState) {
+	const player = state.player;
+	const lateralDelta = rival.lane - player.lane;
+	const direction = Math.abs(lateralDelta) > 0.01 ? Math.sign(lateralDelta) : 1;
+	const separation = Math.max(0.05, (kartContactWidth - Math.abs(lateralDelta)) / 2 + 0.018);
+	player.lane = clamp(player.lane - direction * separation, -1.2, 1.2);
+	rival.lane = clamp(rival.lane + direction * separation, -1.2, 1.2);
+	player.speed *= 0.94;
+	rival.speed *= 0.94;
+	player.collisionCooldown = kartBumpCooldown;
+	rival.collisionCooldown = kartBumpCooldown;
+	addImpact(
+		state,
+		(player.distance + rival.distance) / 2,
+		(player.lane + rival.lane) / 2,
+		'#9defff',
+		0.28
+	);
+	state.events.push({ type: 'hit', source: 'rival' });
+}
+
+function addImpact(state: RaceState, distance: number, lane: number, color: string, duration = 0.55) {
 	state.impacts.push({
 		id: `impact-${state.nextWorldItemId++}`,
 		distance,
 		progress: wrapUnit(distance),
 		lane,
 		elapsed: 0,
-		duration: 0.55,
+		duration,
 		color
 	});
 }
@@ -817,6 +893,7 @@ function createKart(id: string, distance: number, lane: number): KartState {
 		lap: 0,
 		rank: 1,
 		item: null,
+		heldItem: null,
 		roulette: { active: false, elapsed: 0, duration: 0, tick: 0, preview: 'green-shell' },
 		drift: { active: false, side: 0, charge: 0, tier: 0 },
 		boost: { remaining: 0, duration: 1 },
@@ -826,10 +903,7 @@ function createKart(id: string, distance: number, lane: number): KartState {
 }
 
 function courseCurve(trackId: KartTrackId, progress: number) {
-	const theta = wrapUnit(progress) * Math.PI * 2;
-	return trackId === 'prism-circuit'
-		? Math.sin(theta * 1.04) * 0.72 + Math.sin(theta * 2.7 + 0.9) * 0.24 + Math.sin(theta * 5.1) * 0.09
-		: Math.sin(theta * 1.45 + 0.4) * 0.56 + Math.sin(theta * 3.1 - 0.8) * 0.2 + Math.sin(theta * 6.2) * 0.055;
+	return getCourseMapPoint(trackId, progress).curve;
 }
 
 function normalizeSeed(seed: number) {

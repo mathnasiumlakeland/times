@@ -9,6 +9,14 @@ function advance(state: ReturnType<typeof createRaceState>, seconds: number, inp
 	for (let elapsed = 0; elapsed < seconds; elapsed += 1 / 60) updateRace(state, input, 1 / 60);
 }
 
+function holdAndReleaseItem(
+	state: ReturnType<typeof createRaceState>,
+	input: RaceInput = idle
+) {
+	updateRace(state, { ...input, useItem: true }, 1 / 30);
+	updateRace(state, { ...input, useItem: false }, 1 / 30);
+}
+
 describe('kart race', () => {
 	it('counts down, announces go, and starts racing', () => {
 		const race = createRaceState('prism-circuit', { seed: 12 });
@@ -58,6 +66,18 @@ describe('kart race', () => {
 		expect(first.rivals.map((rival) => [rival.skill, rival.phaseOffset])).toEqual(
 			second.rivals.map((rival) => [rival.skill, rival.phaseOffset])
 		);
+	});
+
+	it('spaces the starting grid so kart bodies do not overlap', () => {
+		const race = createRaceState('sunset-galleria', { seed: 100 });
+		const karts = [race.player, ...race.rivals];
+		for (let first = 0; first < karts.length; first++) {
+			for (let second = first + 1; second < karts.length; second++) {
+				const longitudinalGap = Math.abs(karts[first].distance - karts[second].distance);
+				const lateralGap = Math.abs(karts[first].lane - karts[second].lane);
+				expect(longitudinalGap >= 0.0105 || lateralGap >= 0.36).toBe(true);
+			}
+		}
 	});
 
 	it('returns a stable pose for wrapped track progress', () => {
@@ -190,7 +210,7 @@ describe('kart race', () => {
 		advance(race, 3.1);
 		race.player.item = 'green-shell';
 		race.player.lane = 0.92;
-		updateRace(race, { ...idle, steer: 1, useItem: true }, 1 / 30);
+		holdAndReleaseItem(race, { ...idle, steer: 1 });
 		expect(race.projectiles).toHaveLength(1);
 		const launchedAt = race.projectiles[0].distance;
 		advance(race, 0.4);
@@ -210,7 +230,7 @@ describe('kart race', () => {
 			race.rivals[index].distance = 0.12 + index * 0.01;
 			race.rivals[index].progress = race.rivals[index].distance;
 		}
-		updateRace(race, { ...idle, useItem: true }, 1 / 30);
+		holdAndReleaseItem(race);
 		expect(race.projectiles[0].targetId).toBe(race.rivals[0].id);
 		const initialLane = race.projectiles[0].lane;
 		advance(race, 0.15);
@@ -223,29 +243,105 @@ describe('kart race', () => {
 		race.player.distance = 0.4;
 		race.player.progress = 0.4;
 		race.player.item = 'banana';
-		updateRace(race, { ...idle, useItem: true }, 1 / 30);
-		updateRace(race, { ...idle, useItem: true }, 1 / 30);
+		holdAndReleaseItem(race);
 		expect(race.bananas).toHaveLength(1);
 		expect(race.bananas[0].distance).toBeLessThan(race.player.distance);
 		expect(race.player.item).toBeNull();
 	});
 
-	it('makes direct kart collisions affect both drivers', () => {
+	it('holds an item behind the player until the control is released', () => {
+		const race = createRaceState('prism-circuit', { seed: 54 });
+		advance(race, 3.1);
+		race.player.item = 'red-shell';
+
+		updateRace(race, { ...idle, useItem: true }, 1 / 30);
+		expect(race.player.item).toBeNull();
+		expect(race.player.heldItem).toBe('red-shell');
+		expect(race.projectiles).toHaveLength(0);
+		expect(getRaceEvents(race).some((event) => event.type === 'item-hold')).toBe(true);
+
+		advance(race, 0.35, { ...idle, useItem: true });
+		expect(race.player.heldItem).toBe('red-shell');
+		expect(race.projectiles).toHaveLength(0);
+
+		updateRace(race, idle, 1 / 30);
+		expect(race.player.heldItem).toBeNull();
+		expect(race.projectiles).toHaveLength(1);
+		expect(getRaceEvents(race).some((event) => event.type === 'item-use')).toBe(true);
+	});
+
+	it('lets a held item block one incoming shell without stunning the player', () => {
+		const race = createRaceState('prism-circuit', { seed: 55 });
+		advance(race, 3.1);
+		for (const [index, rival] of race.rivals.entries()) {
+			rival.distance = -0.3 - index * 0.03;
+			rival.progress = ((rival.distance % 1) + 1) % 1;
+		}
+		race.player.distance = 0.4;
+		race.player.progress = 0.4;
+		race.player.lane = 0;
+		race.player.item = 'banana';
+		updateRace(race, { ...idle, useItem: true }, 1 / 30);
+		race.player.collisionCooldown = 0.2;
+		race.projectiles.push({
+			id: 'incoming-red',
+			type: 'red-shell',
+			ownerId: race.rivals[0].id,
+			distance: race.player.distance - 0.006,
+			progress: race.player.progress - 0.006,
+			lane: race.player.lane,
+			laneVelocity: 0,
+			speed: 0.155,
+			targetId: 'player',
+			age: 0.2,
+			bounces: 0
+		});
+		getRaceEvents(race);
+
+		updateRace(race, { ...idle, useItem: true }, 1 / 60);
+		expect(race.player.heldItem).toBeNull();
+		expect(race.player.stun.remaining).toBe(0);
+		expect(race.projectiles).toHaveLength(0);
+		expect(
+			getRaceEvents(race).some(
+				(event) =>
+					event.type === 'item-block' &&
+					event.defenseItem === 'banana' &&
+					event.incomingItem === 'red-shell'
+			)
+		).toBe(true);
+	});
+
+	it('uses the rendered kart bodies for light direct bumps', () => {
 		const race = createRaceState('prism-circuit', { seed: 63 });
 		advance(race, 3.1);
 		const rival = race.rivals[0];
+		for (const [index, other] of race.rivals.slice(1).entries()) {
+			other.distance = -0.2 - index * 0.02;
+			other.progress = ((other.distance % 1) + 1) % 1;
+		}
 		race.player.distance = 0.2;
 		race.player.progress = 0.2;
 		race.player.lane = 0;
-		rival.distance = 0.2;
-		rival.progress = 0.2;
-		rival.lane = 0;
+		race.player.speed = 0.07;
+		race.player.boost.remaining = 0.5;
+		rival.distance = 0.209;
+		rival.progress = 0.209;
+		rival.lane = 0.32;
+		rival.targetLane = 0.32;
+		rival.speed = 0.07;
+		getRaceEvents(race);
 		updateRace(race, idle, 1 / 30);
-		expect(race.player.stun.remaining).toBeGreaterThan(0);
-		expect(rival.stun.remaining).toBeGreaterThan(0);
+		expect(race.player.stun.remaining).toBe(0);
+		expect(rival.stun.remaining).toBe(0);
+		expect(race.player.boost.remaining).toBeGreaterThan(0);
+		expect(race.player.speed).toBeGreaterThan(0.06);
+		expect(rival.speed).toBeGreaterThan(0.06);
+		expect(Math.abs(race.player.lane - rival.lane)).toBeGreaterThanOrEqual(0.36);
+		expect(getRaceEvents(race).filter((event) => event.type === 'hit' && event.source === 'rival')).toHaveLength(1);
 	});
 
-	it('does not retrigger one sustained rival contact after the stun cooldown', () => {
+	it('does not retrigger one sustained rival contact after the bump cooldown', () => {
 		const race = createRaceState('prism-circuit', { seed: 64 });
 		advance(race, 3.1);
 		const rival = race.rivals[0];
@@ -325,7 +421,7 @@ describe('kart race', () => {
 		race.player.progress = 0.5;
 		race.player.lane = 0.3;
 		race.player.item = 'banana';
-		updateRace(race, { ...idle, useItem: true }, 1 / 30);
+		holdAndReleaseItem(race);
 		const banana = race.bananas[0];
 		banana.age = 0.23;
 		const rival = race.rivals[0];

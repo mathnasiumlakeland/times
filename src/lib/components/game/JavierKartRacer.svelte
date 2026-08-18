@@ -21,6 +21,7 @@
 		Zap
 	} from 'lucide-svelte';
 	import { KartAudio } from '$lib/kart-audio';
+	import { getCourseMapPoint, getCourseMinimap } from '$lib/kart-course-layout';
 	import {
 		createRaceState,
 		getRaceEvents,
@@ -31,11 +32,20 @@
 		type RaceInput,
 		type RaceState
 	} from '$lib/kart-race';
-	import { renderKartRace, signedTrackDistance, type KartRenderState } from '$lib/kart-renderer';
+	import type { KartScene3D } from '$lib/kart-renderer-3d';
+	import { signedTrackDistance, type KartRenderState } from '$lib/kart-renderer';
 
 	type MusicStatus = 'off' | 'loading' | 'playing' | 'unavailable';
 	type GameScreen = 'select' | 'race' | 'finish';
 	type InputAction = 'left' | 'right' | 'throttle' | 'brake' | 'drift' | 'item';
+	type MinimapRacer = {
+		id: string;
+		name: string;
+		color: string;
+		progress: number;
+		rank: number;
+		player: boolean;
+	};
 	type HudState = {
 		rank: number;
 		lap: number;
@@ -46,8 +56,10 @@
 		time: number;
 		countdown: string;
 		item: KartItem | null;
+		holdingItem: boolean;
 		roulette: boolean;
 		roulettePreview: KartItem;
+		mapRacers: MinimapRacer[];
 	};
 
 	let {
@@ -75,8 +87,8 @@
 		{
 			id: 'sunset-galleria' as const,
 			name: 'Coconut Mall',
-			energy: 'Tropical mall route',
-			description: 'Drift through a sunlit atrium packed with palms, fountains, and storefronts.',
+			energy: 'Two-level mall route',
+			description: 'Climb the escalator, clear the fountain jump, and race the upper gallery.',
 			accent: '#ff7d91'
 		}
 	] as const;
@@ -92,8 +104,10 @@
 		time: 0,
 		countdown: '',
 		item: null,
+		holdingItem: false,
 		roulette: false,
-		roulettePreview: 'green-shell'
+		roulettePreview: 'green-shell',
+		mapRacers: []
 	};
 
 	let selectedTrack = $state<KartTrackId>('prism-circuit');
@@ -105,6 +119,9 @@
 	let canvasWidth = 1;
 	let canvasHeight = 1;
 	let canvasScale = 1;
+	let renderer3d: KartScene3D | undefined;
+	let rendererLoading = true;
+	let componentMounted = false;
 	let race: RaceState | undefined;
 	let animationFrame = 0;
 	let resizeFrame = 0;
@@ -137,8 +154,14 @@
 	const selectedCourseNumber = $derived(selectedTrack === 'prism-circuit' ? '01' : '02');
 	const placement = $derived(formatPlacement(hud.rank));
 	const shownItem = $derived(hud.roulette ? hud.roulettePreview : hud.item);
+	const minimap = $derived(getCourseMinimap(selectedTrack));
+	const minimapStart = $derived(getCourseMapPoint(selectedTrack, 0));
+	const minimapDescription = $derived(
+		`Full course map. ${hud.mapRacers.map((racer) => `${racer.name} is ${formatPlacement(racer.rank)}`).join('. ')}.`
+	);
 
 	onMount(() => {
+		componentMounted = true;
 		document.documentElement.classList.add('jkr-page');
 		document.body.classList.add('jkr-page');
 		try {
@@ -146,6 +169,19 @@
 		} catch {
 			// The visual game remains available on browsers that reject Web Audio setup.
 		}
+		void import('$lib/kart-renderer-3d')
+			.then(({ KartScene3D }) => {
+				if (!componentMounted) return;
+				renderer3d = new KartScene3D(canvas);
+				rendererLoading = false;
+				resizeCanvas();
+			})
+			.catch((error) => {
+				if (!componentMounted) return;
+				rendererLoading = false;
+				canvasFailed = true;
+				console.error('The Grand Prix 3D renderer could not start.', error);
+			});
 		reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 		if ('ResizeObserver' in window) {
 			try {
@@ -168,6 +204,7 @@
 	});
 
 	onDestroy(() => {
+		componentMounted = false;
 		if (typeof window !== 'undefined') window.cancelAnimationFrame(animationFrame);
 		if (typeof window !== 'undefined') window.cancelAnimationFrame(resizeFrame);
 		if (typeof window !== 'undefined') window.cancelAnimationFrame(settleResizeFrame);
@@ -184,6 +221,8 @@
 			document.body.classList.remove('jkr-page');
 		}
 		raceAudio?.destroy();
+		renderer3d?.dispose();
+		renderer3d = undefined;
 		keys.clear();
 		pointerActions.clear();
 	});
@@ -212,10 +251,7 @@
 		canvasScale = Math.min(window.devicePixelRatio || 1, coarse ? 1.25 : 1.5);
 		canvasWidth = Math.max(1, Math.round(bounds.width));
 		canvasHeight = Math.max(1, Math.round(bounds.height));
-		const pixelWidth = Math.max(1, Math.round(canvasWidth * canvasScale));
-		const pixelHeight = Math.max(1, Math.round(canvasHeight * canvasScale));
-		if (canvas.width !== pixelWidth) canvas.width = pixelWidth;
-		if (canvas.height !== pixelHeight) canvas.height = pixelHeight;
+		renderer3d?.resize(canvasWidth, canvasHeight, canvasScale);
 	}
 
 	function frame(now: number) {
@@ -257,15 +293,14 @@
 	}
 
 	function render(time: number) {
-		const context = canvas?.getContext('2d');
-		if (!context) {
-			canvasFailed = true;
+		if (!renderer3d) {
+			if (!rendererLoading) canvasFailed = true;
 			return false;
 		}
 		if (canvasWidth < 2 || canvasHeight < 2) return false;
-		context.setTransform(canvasScale, 0, 0, canvasScale, 0, 0);
 		const renderState = race ? toRenderState(race, time) : demoRenderState(time);
-		renderKartRace(context, canvasWidth, canvasHeight, renderState);
+		renderer3d.resize(canvasWidth, canvasHeight, canvasScale);
+		renderer3d.render(renderState);
 		return true;
 	}
 
@@ -303,6 +338,8 @@
 
 	function toRenderState(state: RaceState, time: number): KartRenderState {
 		const maxSpeed = Math.max(1, state.track.maxSpeed);
+		const heldItem = state.player.heldItem;
+		const heldItemLane = state.player.lane + (state.player.lane >= 0 ? -0.15 : 0.15);
 		return {
 			trackId: state.track.id,
 			progress: state.player.progress,
@@ -329,18 +366,28 @@
 				distance: signedTrackDistance(state.player.progress, pickup.progress),
 				active: pickup.active
 			})),
-			projectiles: state.projectiles.map((projectile) => ({
-				id: projectile.id,
-				type: projectile.type,
-				lane: projectile.lane,
-				distance: projectile.distance - state.player.distance,
-				heading: Math.max(-1, Math.min(1, projectile.laneVelocity * 1.7))
-			})),
-			bananas: state.bananas.map((banana) => ({
-				id: banana.id,
-				lane: banana.lane,
-				distance: banana.distance - state.player.distance
-			})),
+			projectiles: [
+				...(heldItem === 'green-shell' || heldItem === 'red-shell'
+					? [{ id: 'player-held-item', type: heldItem, lane: heldItemLane, distance: -0.0048, heading: 0 }]
+					: []),
+				...state.projectiles.map((projectile) => ({
+					id: projectile.id,
+					type: projectile.type,
+					lane: projectile.lane,
+					distance: projectile.distance - state.player.distance,
+					heading: Math.max(-1, Math.min(1, projectile.laneVelocity * 1.7))
+				}))
+			],
+			bananas: [
+				...(heldItem === 'banana'
+					? [{ id: 'player-held-item', lane: heldItemLane, distance: -0.0048 }]
+					: []),
+				...state.bananas.map((banana) => ({
+					id: banana.id,
+					lane: banana.lane,
+					distance: banana.distance - state.player.distance
+				}))
+			],
 			impacts: state.impacts.map((impact) => ({
 				id: impact.id,
 				lane: impact.lane,
@@ -369,9 +416,28 @@
 			drift: Math.min(1, state.player.drift.charge),
 			time: state.raceTime,
 			countdown: state.phase === 'countdown' ? (state.countdown > 0 ? String(Math.ceil(state.countdown)) : 'IGNITE!') : '',
-			item: state.player.item,
+			item: state.player.heldItem ?? state.player.item,
+			holdingItem: Boolean(state.player.heldItem),
 			roulette: state.player.roulette.active,
-			roulettePreview: state.player.roulette.preview
+			roulettePreview: state.player.roulette.preview,
+			mapRacers: [
+				{
+					id: state.player.id,
+					name: 'You',
+					color: '#d6f247',
+					progress: state.player.progress,
+					rank: state.player.rank,
+					player: true
+				},
+				...state.rivals.map((rival) => ({
+					id: rival.id,
+					name: rival.name,
+					color: rival.color,
+					progress: rival.progress,
+					rank: rival.rank,
+					player: false
+				}))
+			]
 		};
 	}
 
@@ -475,7 +541,9 @@
 					announcement = 'Mini boost!';
 					break;
 				case 'pickup':
-					if (event.racerId === 'player') announcement = `${itemLabel(event.item)} ready.`;
+					if (event.racerId === 'player') {
+						announcement = `${itemLabel(event.item)} ready. Hold to defend, release to use.`;
+					}
 					break;
 				case 'roulette-start':
 					if (event.racerId === 'player') {
@@ -490,6 +558,17 @@
 					if (event.racerId === 'player') playRaceSound((audio) => audio.playItemReady(event.item));
 					break;
 				case 'item':
+					break;
+				case 'item-hold':
+					if (event.racerId === 'player') {
+						playRaceSound((audio) => audio.playDefenseArm(event.item));
+						announcement = `${itemLabel(event.item)} held behind. Release to use.`;
+					}
+					break;
+				case 'item-block':
+					playRaceSound((audio) => audio.playDefenseBlock());
+					if ('vibrate' in navigator) navigator.vibrate([24, 28, 24]);
+					announcement = `${itemLabel(event.defenseItem)} blocked the ${itemLabel(event.incomingItem)}!`;
 					break;
 				case 'item-use':
 					if (event.racerId === 'player') {
@@ -739,7 +818,7 @@
 	</div>
 
 	<div class="jkr-screen-frame" inert={paused || screen === 'finish'}>
-		<canvas bind:this={canvas} class="jkr-canvas" aria-label={`Grand Prix race view on ${selectedCourse.name}`}></canvas>
+		<canvas bind:this={canvas} class="jkr-canvas" aria-label={`3D Grand Prix race view on ${selectedCourse.name}`}></canvas>
 		<div class="jkr-vignette" aria-hidden="true"></div>
 		{#if canvasFailed}
 			<div class="jkr-canvas-fallback" role="status">
@@ -751,12 +830,12 @@
 		{#if screen === 'select'}
 			<section class="jkr-select" aria-labelledby="jkr-title">
 				<div class="jkr-title-block">
-					<p class="jkr-kicker"><span></span> Bonus circuit</p>
+					<p class="jkr-kicker"><span></span> Bonus circuit · 3D</p>
 					<h1 id="jkr-title">Grand <span>Prix</span></h1>
 					<div class="jkr-key-legend" aria-label="Keyboard controls">
 						<span><kbd>WASD</kbd> drive</span>
 						<span><kbd>SPACE</kbd> drift</span>
-						<span><kbd>E</kbd> item</span>
+						<span><kbd>HOLD E</kbd> defend</span>
 					</div>
 				</div>
 
@@ -775,6 +854,39 @@
 				<div class="jkr-time-block"><span>Race time</span><strong>{formatTime(hud.time)}</strong></div>
 			</section>
 
+			<aside class="jkr-minimap" aria-label={minimapDescription}>
+				<div class="jkr-minimap-heading">
+					<span><Flag size={12} strokeWidth={2.8} /> Course map</span>
+					<strong>{selectedTrack === 'sunset-galleria' ? '2 levels' : 'Live'}</strong>
+				</div>
+				<svg viewBox="0 0 100 74" aria-hidden="true">
+					<defs>
+						<linearGradient id="jkr-map-gradient" x1="0" y1="0" x2="1" y2="1">
+							<stop offset="0" stop-color="#66dfff" />
+							<stop offset=".5" stop-color="#8d75ff" />
+							<stop offset="1" stop-color="#ff718d" />
+						</linearGradient>
+					</defs>
+					<path class="jkr-minimap-shadow" d={minimap.path}></path>
+					<path class="jkr-minimap-route" d={minimap.path}></path>
+					<circle class="jkr-minimap-start" cx={minimapStart.x} cy={minimapStart.y} r="2.1"></circle>
+					{#each hud.mapRacers as racer (racer.id)}
+						{@const marker = getCourseMapPoint(selectedTrack, racer.progress)}
+						{#if racer.player}
+							<circle class="jkr-minimap-player-pulse" cx={marker.x} cy={marker.y} r="5.1"></circle>
+						{/if}
+						<circle
+							class:player={racer.player}
+							class="jkr-minimap-racer"
+							cx={marker.x}
+							cy={marker.y}
+							r={racer.player ? 3.5 : 2.45}
+							fill={racer.color}
+						></circle>
+					{/each}
+				</svg>
+			</aside>
+
 			<div class="jkr-speedometer" aria-label={`${hud.speed} kilometers per hour`}>
 				<Gauge size={18} strokeWidth={2.5} />
 				<strong>{hud.speed}</strong>
@@ -789,12 +901,19 @@
 			<div
 				class:roulette={hud.roulette}
 				class:ready={Boolean(hud.item)}
+				class:holding={hud.holdingItem}
 				class="jkr-item-slot"
-				aria-label={hud.roulette ? 'Choosing an item' : shownItem ? `${itemLabel(shownItem)} ready. Press E to use.` : 'No item'}
+				aria-label={hud.roulette
+					? 'Choosing an item'
+					: shownItem
+						? hud.holdingItem
+							? `${itemLabel(shownItem)} defending. Release the item control to use.`
+							: `${itemLabel(shownItem)} ready. Hold the item control to defend and release to use.`
+						: 'No item'}
 			>
 				<span class="jkr-item-title">{hud.roulette ? 'Roulette' : hud.item ? itemLabel(hud.item) : 'Item'}</span>
 				<div class="jkr-item-icon" aria-hidden="true">{@render itemArtwork(shownItem)}</div>
-				<small>{hud.roulette ? 'Choosing...' : hud.item ? 'Press E' : 'Find a ? box'}</small>
+				<small>{hud.roulette ? 'Choosing...' : hud.item ? (hud.holdingItem ? 'Release E' : 'Hold E to defend') : 'Find a ? box'}</small>
 			</div>
 
 			{#if hud.countdown}
@@ -819,16 +938,24 @@
 				<button class="jkr-touch-drift" type="button" aria-label="Drift" onpointerdown={(event) => pressControl('drift', event)} onpointerup={releaseControl} onpointercancel={releaseControl} onlostpointercapture={releaseControl}>DRIFT</button>
 				<button
 					class:ready={Boolean(hud.item)}
+					class:holding={hud.holdingItem}
 					class="jkr-touch-item"
 					type="button"
 					disabled={!hud.item}
-					aria-label={hud.item ? `Use ${itemLabel(hud.item)}` : 'No item available'}
+					aria-label={hud.item
+						? hud.holdingItem
+							? `${itemLabel(hud.item)} defending. Release to use.`
+							: `Press and hold ${itemLabel(hud.item)} to defend. Release to use.`
+						: 'No item available'}
 					onpointerdown={(event) => pressControl('item', event)}
 					onpointerup={releaseControl}
 					onpointercancel={releaseControl}
 					onlostpointercapture={releaseControl}
 				>
 					<span class="jkr-control-item-art" aria-hidden="true">{@render itemArtwork(hud.item)}</span>
+					{#if hud.item}
+						<span class="jkr-touch-item-copy" aria-hidden="true">{hud.holdingItem ? 'RELEASE' : 'HOLD'}</span>
+					{/if}
 				</button>
 				<button class="jkr-touch-go" type="button" aria-label="Accelerate" onpointerdown={(event) => pressControl('throttle', event)} onpointerup={releaseControl} onpointercancel={releaseControl} onlostpointercapture={releaseControl}>GO</button>
 			</div>
@@ -970,6 +1097,19 @@
 	.jkr-lap-block small { color: #8791a8; font-size: .56em; }
 	.jkr-time-block { min-width: 105px; }
 	.jkr-time-block strong { margin-top: 3px; font-size: 17px; }
+	.jkr-minimap { position: absolute; z-index: 10; right: max(26px, env(safe-area-inset-right)); top: max(86px, calc(78px + env(safe-area-inset-top))); width: 190px; padding: 9px 10px 8px; border-radius: 18px; color: white; background: rgba(7,10,24,.76); box-shadow: inset 0 0 0 1px rgba(255,255,255,.13), 0 13px 30px rgba(0,0,0,.25); backdrop-filter: blur(9px); pointer-events: none; }
+	.jkr-minimap-heading { min-height: 18px; display: flex; align-items: center; justify-content: space-between; color: #9da8be; text-transform: uppercase; letter-spacing: .1em; font-size: 7px; font-weight: 900; }
+	.jkr-minimap-heading span { display: inline-flex; align-items: center; gap: 5px; }
+	.jkr-minimap-heading strong { color: #d6f247; font-size: 7px; }
+	.jkr-minimap svg { width: 100%; height: auto; display: block; overflow: visible; }
+	.jkr-minimap-shadow, .jkr-minimap-route { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+	.jkr-minimap-shadow { stroke: rgba(1,4,13,.9); stroke-width: 7; }
+	.jkr-minimap-route { stroke: url(#jkr-map-gradient); stroke-width: 3.4; }
+	.course-galleria .jkr-minimap-route { stroke: #ffb36f; }
+	.jkr-minimap-start { fill: #fff8dc; stroke: #0a1125; stroke-width: 1.4; }
+	.jkr-minimap-racer { stroke: #090f23; stroke-width: 1.2; }
+	.jkr-minimap-racer.player { stroke: #fff; stroke-width: 1.6; filter: drop-shadow(0 0 3px rgba(214,242,71,.85)); }
+	.jkr-minimap-player-pulse { fill: none; stroke: rgba(214,242,71,.65); stroke-width: 1.1; transform-box: fill-box; transform-origin: center; animation: jkrMapPulse 1.15s ease-out infinite; }
 
 	.jkr-speedometer { position: absolute; z-index: 9; right: max(27px, env(safe-area-inset-right)); bottom: max(27px, env(safe-area-inset-bottom)); width: 126px; aspect-ratio: 1; padding-top: 17px; display: flex; flex-direction: column; align-items: center; justify-content: center; border-radius: 50%; color: #a7dded; background: radial-gradient(circle, rgba(10,17,37,.83) 59%, rgba(10,17,37,.34) 61%, rgba(167,221,237,.22) 63%, rgba(10,17,37,.72) 66%); box-shadow: 0 13px 35px rgba(0,0,0,.27); pointer-events: none; }
 	.jkr-speedometer strong { color: white; font-family: 'Space Grotesk', sans-serif; font-size: 35px; line-height: .9; letter-spacing: -.055em; font-variant-numeric: tabular-nums; }
@@ -982,8 +1122,10 @@
 	.jkr-boost-track span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #66dfff, #d6f247 62%, #ff718d); box-shadow: 0 0 13px rgba(214,242,71,.45); transition-property: width; transition-duration: 80ms; transition-timing-function: linear; }
 	.jkr-item-slot { position: absolute; z-index: 12; left: max(27px, env(safe-area-inset-left)); bottom: max(27px, env(safe-area-inset-bottom)); width: 112px; min-height: 128px; padding: 10px; display: grid; justify-items: center; border-radius: 22px; color: white; background: rgba(7,10,24,.78); box-shadow: inset 0 0 0 1px rgba(255,255,255,.13), 0 13px 32px rgba(0,0,0,.28); pointer-events: none; }
 	.jkr-item-slot.ready { box-shadow: inset 0 0 0 2px rgba(214,242,71,.68), 0 0 28px rgba(214,242,71,.18), 0 13px 32px rgba(0,0,0,.28); }
+	.jkr-item-slot.holding { box-shadow: inset 0 0 0 2px rgba(167,221,237,.9), 0 0 31px rgba(102,223,255,.26), 0 13px 32px rgba(0,0,0,.28); }
+	.jkr-item-slot.holding .jkr-item-icon { transform: translateY(3px) scale(.96); box-shadow: inset 0 -2px 0 rgba(0,0,0,.14), 0 0 20px rgba(102,223,255,.3); }
 	.jkr-item-title { align-self: start; color: #9da8be; text-transform: uppercase; letter-spacing: .12em; font-size: 8px; font-weight: 900; }
-	.jkr-item-icon { width: 66px; height: 66px; display: grid; place-items: center; border-radius: 17px; color: #8b96ad; background: rgba(255,255,255,.07); box-shadow: inset 0 -4px 0 rgba(0,0,0,.14); }
+	.jkr-item-icon { width: 66px; height: 66px; display: grid; place-items: center; border-radius: 17px; color: #8b96ad; background: rgba(255,255,255,.07); box-shadow: inset 0 -4px 0 rgba(0,0,0,.14); transition-property: transform, box-shadow; transition-duration: 150ms; transition-timing-function: var(--ease); }
 	.jkr-item-slot.ready .jkr-item-icon { background: #f7f3dc; }
 	.jkr-item-icon > strong { font-family: 'Space Grotesk', sans-serif; font-size: 38px; line-height: 1; }
 	.jkr-item-slot small { color: #d6f247; font-size: 8px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
@@ -1008,6 +1150,7 @@
 	.jkr-control-item-art { width: 34px; height: 34px; display: grid; place-items: center; }
 	.jkr-control-item-art .jkr-item-art { width: 36px; height: 36px; }
 	.jkr-control-item-art .jkr-item-question { font-size: 24px; }
+	.jkr-touch-item-copy { position: absolute; left: 50%; bottom: 3px; color: #0a1125; font-size: 6px; font-weight: 900; letter-spacing: .04em; line-height: 1; transform: translateX(-50%); }
 
 	.jkr-countdown { position: absolute; z-index: 15; inset: 0; display: grid; place-items: center; pointer-events: none; }
 	.jkr-countdown span { min-width: 150px; min-height: 150px; padding: 20px; display: grid; place-items: center; border-radius: 50%; color: #0a1125; background: #d6f247; box-shadow: 0 12px 0 #829600, 0 0 0 14px rgba(214,242,71,.14), 0 30px 70px rgba(0,0,0,.3); font-family: 'Space Grotesk', sans-serif; font-size: clamp(48px, 9vw, 94px); font-weight: 800; letter-spacing: -.07em; animation: jkrCountdown 420ms var(--ease) both; }
@@ -1070,6 +1213,7 @@
 		.jkr-rank-block strong { font-size: 24px; }
 		.jkr-time-block { min-width: 88px; }
 		.jkr-time-block strong { font-size: 14px; }
+		.jkr-minimap { top: max(62px, calc(57px + env(safe-area-inset-top))); width: 154px; padding: 7px 8px 6px; border-radius: 14px; }
 		.jkr-speedometer { width: 91px; right: max(16px, env(safe-area-inset-right)); bottom: max(13px, env(safe-area-inset-bottom)); }
 		.jkr-speedometer strong { font-size: 27px; }
 		.jkr-boost-meter { bottom: max(12px, env(safe-area-inset-bottom)); width: min(250px, 32vw); padding: 8px 10px; }
@@ -1103,6 +1247,7 @@
 		.jkr-action-controls .jkr-touch-brake { width: 48px; height: 48px; border-radius: 16px; }
 		.jkr-action-controls .jkr-touch-item { position: absolute; right: 58px; bottom: 67px; width: 45px; height: 45px; border-radius: 50%; color: #0a1125; background: #ffd45a; box-shadow: inset 0 0 0 2px rgba(255,255,255,.3), 0 5px 0 #aa7800; }
 		.jkr-action-controls .jkr-touch-item.ready { background: #d6f247; box-shadow: inset 0 0 0 2px rgba(255,255,255,.4), 0 5px 0 #829600, 0 0 19px rgba(214,242,71,.42); animation: jkrItemReady 800ms ease-in-out infinite alternate; }
+		.jkr-action-controls .jkr-touch-item.holding { background: #a7dded; box-shadow: inset 0 0 0 2px rgba(255,255,255,.5), 0 2px 0 #5f9eb1, 0 0 22px rgba(102,223,255,.46); animation: none; transform: translateY(3px) scale(.96); }
 		.jkr-control-item-art { transform: scale(.78); }
 	}
 
@@ -1125,6 +1270,8 @@
 		.jkr-brand > span:last-child, .jkr-music span { display: none; }
 		.jkr-music { width: 44px; padding: 0; justify-content: center; }
 		.jkr-hud { left: max(13px, env(safe-area-inset-left)); }
+		.jkr-minimap { right: max(13px, env(safe-area-inset-right)); width: 118px; }
+		.jkr-minimap-heading { display: none; }
 		.jkr-lap-block { display: none !important; }
 		.jkr-steer-controls button { width: 57px; height: 57px; border-radius: 18px; }
 		.jkr-action-controls .jkr-touch-go { width: 66px; height: 66px; }
@@ -1237,6 +1384,11 @@
 		.jkr-lap-block strong { margin-top: 1px; font-size: 16px; }
 		.jkr-time-block { min-width: 74px; }
 		.jkr-time-block strong { margin-top: 2px; font-size: 11px; }
+		.jkr-minimap { right: 6px; top: 6px; width: 86px; padding: 4px 5px; border-radius: 11px; background: rgba(7,10,24,.73); box-shadow: inset 0 0 0 1px rgba(255,255,255,.12), 0 7px 14px rgba(0,0,0,.18); backdrop-filter: none; }
+		.jkr-minimap-heading { display: none; }
+		.jkr-minimap-shadow { stroke-width: 7.8; }
+		.jkr-minimap-route { stroke-width: 4; }
+		.jkr-minimap-racer { stroke-width: 1.45; }
 
 		.jkr-speedometer { right: 6px; bottom: 6px; width: 54px; padding-top: 4px; background: radial-gradient(circle, rgba(10,17,37,.86) 58%, rgba(167,221,237,.22) 61%, rgba(10,17,37,.78) 65%); }
 		.jkr-speedometer :global(svg) { width: 12px; height: 12px; }
@@ -1289,6 +1441,7 @@
 		.jkr-action-controls .jkr-touch-brake { left: 0; bottom: 2px; width: 49px; height: 49px; border-radius: 15px; }
 		.jkr-action-controls .jkr-touch-item { right: 15px; top: 0; width: 54px; height: 54px; color: #0a1125; background: #ffd45a; box-shadow: inset 0 0 0 2px rgba(255,255,255,.36), 0 5px 0 #aa7800; }
 		.jkr-action-controls .jkr-touch-item.ready { background: #d6f247; box-shadow: inset 0 0 0 2px rgba(255,255,255,.42), 0 5px 0 #829600, 0 0 18px rgba(214,242,71,.38); animation: jkrItemReady 800ms ease-in-out infinite alternate; }
+		.jkr-action-controls .jkr-touch-item.holding { background: #a7dded; box-shadow: inset 0 0 0 2px rgba(255,255,255,.5), 0 2px 0 #5f9eb1, 0 0 22px rgba(102,223,255,.42); animation: none; transform: translateY(3px) scale(.96); }
 
 		.jkr-modal-wrap { position: fixed; inset: 0; padding: calc(env(safe-area-inset-top, 0px) + 16px) calc(env(safe-area-inset-right, 0px) + 12px) calc(env(safe-area-inset-bottom, 0px) + 16px) calc(env(safe-area-inset-left, 0px) + 12px); overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; }
 		.jkr-modal { width: min(390px, 100%); padding: 23px 20px; border-radius: 24px; }
@@ -1313,9 +1466,10 @@
 	}
 
 	@keyframes jkrItemReady { from { transform: translateY(0); } to { transform: translateY(-3px); } }
+	@keyframes jkrMapPulse { from { opacity: .9; transform: scale(.65); } to { opacity: 0; transform: scale(1.5); } }
 
 	@media (prefers-reduced-motion: reduce) {
-		.jkr-kicker, .jkr-title-block h1, .jkr-key-legend, .jkr-course-picker, .jkr-modal-wrap, .jkr-modal, .jkr-countdown span, .jkr-item-slot.roulette .jkr-item-icon, .jkr-action-controls .jkr-touch-item.ready { animation: none; }
+		.jkr-kicker, .jkr-title-block h1, .jkr-key-legend, .jkr-course-picker, .jkr-modal-wrap, .jkr-modal, .jkr-countdown span, .jkr-item-slot.roulette .jkr-item-icon, .jkr-action-controls .jkr-touch-item.ready, .jkr-minimap-player-pulse { animation: none; }
 		.jkr-course-option, .jkr-course-art, .jkr-start, .jkr-brand, .jkr-icon-button, .jkr-music, .jkr-modal-actions button, .jkr-modal > a { transition-duration: .01ms; }
 	}
 </style>

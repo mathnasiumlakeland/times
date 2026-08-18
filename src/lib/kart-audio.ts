@@ -106,6 +106,21 @@ export class KartAudio {
 		this.tone(root * 1.25, now + 0.065, 0.18, 0.09, 'triangle');
 	}
 
+	playDefenseArm(item: 'green-shell' | 'red-shell' | 'banana') {
+		const now = this.ensureGraph().currentTime;
+		const root = item === 'red-shell' ? 440 : item === 'banana' ? 370 : 415;
+		this.tone(root, now, 0.09, 0.055, 'triangle');
+		this.tone(root * 1.5, now + 0.045, 0.14, 0.065, 'triangle');
+	}
+
+	playDefenseBlock() {
+		const context = this.ensureGraph();
+		const now = context.currentTime;
+		this.noiseBurst(now, 0.16, 0.12, 2100);
+		this.tone(880, now, 0.1, 0.1, 'square');
+		this.tone(1174.66, now + 0.055, 0.22, 0.09, 'triangle');
+	}
+
 	playShellLaunch(homing: boolean) {
 		const context = this.ensureGraph();
 		const now = context.currentTime;
